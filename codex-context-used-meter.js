@@ -4,12 +4,15 @@
   const STYLE_ID = "ksg-codex-context-usage-meter-style";
   const ROOT_ID = "ksg-codex-context-usage-meter";
   const CAPTURE_STATE_KEY = "__ksgCodexContextUsageMeterCaptureState";
-  const SCRIPT_VERSION = 20;
+  const SCRIPT_VERSION = 21;
   const UPDATE_INTERVAL_MS = 10000;
   const SLOW_SCAN_INTERVAL_MS = 30000;
   const SWITCH_RETRY_WINDOW_MS = 8000;
   const SWITCH_RETRY_INTERVAL_MS = 700;
   const NAVIGATION_PENDING_MS = 1500;
+  const CAPTURE_UPDATE_DELAY_MS = 120;
+  const MUTATION_UPDATE_DELAY_MS = 900;
+  const ACTIVE_CONVERSATION_LOOKUP_CACHE_MS = 250;
   const MAX_TEXT_LENGTH = 120000;
   const MAX_CAPTURE_TEXT_LENGTH = 2000000;
 
@@ -36,6 +39,9 @@
     lastReading: null,
     readingsByConversationId: new Map(),
     lastAnimatedUsedByConversationId: new Map(),
+    root: null,
+    value: null,
+    fill: null,
     lastScanAt: 0,
     lastScannedConversationId: null,
     navigationPendingUntil: 0,
@@ -45,6 +51,9 @@
     observer: null,
     navigationListener: null,
     pendingUpdate: 0,
+    pendingUpdateDueAt: 0,
+    cachedActiveConversationId: null,
+    activeConversationIdLookupAt: 0,
     appSignalScope: null,
     appSignalModules: null,
     appSignalModulesPromise: null,
@@ -181,7 +190,12 @@
 
   function ensureRoot() {
     let root = document.getElementById(ROOT_ID);
-    if (root) return root;
+    if (root) {
+      state.root = root;
+      state.value = root.querySelector(".ksg-context-meter-value");
+      state.fill = root.querySelector(".ksg-context-meter-fill");
+      return root;
+    }
 
     root = document.createElement("div");
     root.id = ROOT_ID;
@@ -196,6 +210,9 @@
       </div>
     `;
     document.body.appendChild(root);
+    state.root = root;
+    state.value = root.querySelector(".ksg-context-meter-value");
+    state.fill = root.querySelector(".ksg-context-meter-fill");
     return root;
   }
 
@@ -318,6 +335,11 @@
   }
 
   function readActiveConversationId() {
+    const now = Date.now();
+    if (now - state.activeConversationIdLookupAt < ACTIVE_CONVERSATION_LOOKUP_CACHE_MS) {
+      return state.cachedActiveConversationId;
+    }
+
     const selectors = [
       `[aria-current="page"][data-app-action-sidebar-thread-id]`,
       `[data-app-action-sidebar-thread-active="true"][data-app-action-sidebar-thread-id]`,
@@ -330,9 +352,15 @@
     for (const selector of selectors) {
       const element = document.querySelector(selector);
       const conversationId = getElementConversationId(element);
-      if (conversationId) return conversationId;
+      if (conversationId) {
+        state.cachedActiveConversationId = conversationId;
+        state.activeConversationIdLookupAt = now;
+        return conversationId;
+      }
     }
 
+    state.cachedActiveConversationId = null;
+    state.activeConversationIdLookupAt = now;
     return null;
   }
 
@@ -368,7 +396,10 @@
     if (normalizedConversationId !== state.activeConversationId) {
       clearRetryUpdate();
       window.clearTimeout(state.pendingUpdate);
+      state.pendingUpdateDueAt = 0;
       state.activeConversationId = normalizedConversationId;
+      state.cachedActiveConversationId = normalizedConversationId;
+      state.activeConversationIdLookupAt = Date.now();
       state.lastReading = state.readingsByConversationId.get(normalizedConversationId) || null;
       state.lastScanAt = 0;
       state.lastScannedConversationId = null;
@@ -395,6 +426,8 @@
       activateConversationId(activeConversationId);
     } else {
       state.activeConversationId = null;
+      state.cachedActiveConversationId = null;
+      state.activeConversationIdLookupAt = Date.now();
       state.navigationPendingUntil = 0;
       state.switchRetryUntil = 0;
       clearRetryUpdate();
@@ -1226,7 +1259,7 @@
     }
 
     state.lastReading = reading;
-    updateMeter();
+    scheduleUpdate(CAPTURE_UPDATE_DELAY_MS);
   }
 
   function inspectCandidateText(text, source, ownerConversationId) {
@@ -1644,13 +1677,6 @@
       return statusReading;
     }
 
-    const domReading = parseTextForReading(collectDomText(), "dom");
-    if (domReading) {
-      state.switchRetryUntil = 0;
-      clearRetryUpdate();
-      return domReading;
-    }
-
     const localReading = parseTextForReading(safeStorageText(localStorage), "localStorage");
     if (localReading) {
       state.switchRetryUntil = 0;
@@ -1666,6 +1692,13 @@
     }
 
     if (!inSwitchRetryWindow) {
+      const domReading = parseTextForReading(collectDomText(), "dom");
+      if (domReading) {
+        state.switchRetryUntil = 0;
+        clearRetryUpdate();
+        return domReading;
+      }
+
       const slowWindowReading = parseTextForReading(scanLikelyWindowState(), "window");
       if (slowWindowReading) return slowWindowReading;
 
@@ -1697,21 +1730,22 @@
     if (!document.body) return;
 
     const root = ensureRoot();
-    const value = root.querySelector(".ksg-context-meter-value");
-    const fill = root.querySelector(".ksg-context-meter-fill");
+    const value = state.value || root.querySelector(".ksg-context-meter-value");
+    const fill = state.fill || root.querySelector(".ksg-context-meter-fill");
     const reading = detectReading();
     const activeConversationId = state.activeConversationId || readActiveConversationId();
 
     if (!value || !fill) return;
 
     if (!reading) {
-      root.dataset.known = "false";
-      root.dataset.level = "normal";
-      root.title = activeConversationId
+      const title = activeConversationId
         ? `No context usage value is exposed for conversation ${activeConversationId} in the current page state yet.`
         : "No context usage value is exposed in the current page state yet.";
-      value.textContent = "Context Used --";
-      fill.style.width = "0%";
+      if (root.dataset.known !== "false") root.dataset.known = "false";
+      if (root.dataset.level !== "normal") root.dataset.level = "normal";
+      if (root.title !== title) root.title = title;
+      if (value.textContent !== "Context Used --") value.textContent = "Context Used --";
+      if (fill.style.width !== "0%") fill.style.width = "0%";
       return;
     }
 
@@ -1734,16 +1768,30 @@
       state.lastAnimatedUsedByConversationId.set(readingConversationId, reading.used);
     }
 
-    root.dataset.known = "true";
-    root.dataset.level = reading.percent >= 90 ? "danger" : reading.percent >= 75 ? "warn" : "normal";
-    root.title = `Source: ${reading.source}${reading.raw ? ` | ${reading.raw}` : ""}`;
-    value.textContent = `Context Used ${percentText}%${details}`;
-    fill.style.width = `${reading.percent.toFixed(1)}%`;
+    const level = reading.percent >= 90 ? "danger" : reading.percent >= 75 ? "warn" : "normal";
+    const title = `Source: ${reading.source}${reading.raw ? ` | ${reading.raw}` : ""}`;
+    const text = `Context Used ${percentText}%${details}`;
+    const width = `${reading.percent.toFixed(1)}%`;
+
+    if (root.dataset.known !== "true") root.dataset.known = "true";
+    if (root.dataset.level !== level) root.dataset.level = level;
+    if (root.title !== title) root.title = title;
+    if (value.textContent !== text) value.textContent = text;
+    if (fill.style.width !== width) fill.style.width = width;
   }
 
-  function scheduleUpdate() {
+  function scheduleUpdate(delayMs = MUTATION_UPDATE_DELAY_MS) {
+    const delay = Math.max(0, Number(delayMs) || 0);
+    const dueAt = Date.now() + delay;
+    if (state.pendingUpdate && state.pendingUpdateDueAt <= dueAt) return;
+
     window.clearTimeout(state.pendingUpdate);
-    state.pendingUpdate = window.setTimeout(updateMeter, 350);
+    state.pendingUpdateDueAt = dueAt;
+    state.pendingUpdate = window.setTimeout(() => {
+      state.pendingUpdate = 0;
+      state.pendingUpdateDueAt = 0;
+      updateMeter();
+    }, delay);
   }
 
   function handlePotentialNavigation(event) {
@@ -1754,7 +1802,7 @@
     if (!conversationId) return;
 
     activateConversationId(conversationId, { pendingNavigation: true });
-    updateMeter();
+    scheduleUpdate(CAPTURE_UPDATE_DELAY_MS);
   }
 
   function clearRetryUpdate() {
@@ -1786,7 +1834,7 @@
           : mutation.target && mutation.target.parentElement;
         if (target && target.closest(`#${ROOT_ID}`)) continue;
 
-        scheduleUpdate();
+        scheduleUpdate(MUTATION_UPDATE_DELAY_MS);
         return;
       }
     });
@@ -1809,6 +1857,7 @@
     destroy() {
       window.clearInterval(state.timer);
       window.clearTimeout(state.pendingUpdate);
+      state.pendingUpdateDueAt = 0;
       clearRetryUpdate();
       if (state.observer) state.observer.disconnect();
       if (state.navigationListener) {
