@@ -4,7 +4,7 @@
   const STYLE_ID = "ksg-codex-context-usage-meter-style";
   const ROOT_ID = "ksg-codex-context-usage-meter";
   const CAPTURE_STATE_KEY = "__ksgCodexContextUsageMeterCaptureState";
-  const SCRIPT_VERSION = 19;
+  const SCRIPT_VERSION = 20;
   const UPDATE_INTERVAL_MS = 10000;
   const SLOW_SCAN_INTERVAL_MS = 30000;
   const SWITCH_RETRY_WINDOW_MS = 8000;
@@ -140,17 +140,19 @@
 
       #${ROOT_ID} .ksg-context-hit-pop {
         position: absolute;
-        left: 50%;
-        top: -4px;
+        right: calc(100% + 10px);
+        top: 50%;
         z-index: 1;
         color: #fb7185;
-        font-size: 13px;
+        font-size: 14px;
         font-weight: 800;
         line-height: 1;
         opacity: 0;
         text-shadow: 0 1px 0 rgba(0, 0, 0, 0.45), 0 0 12px rgba(251, 113, 133, 0.5);
-        transform: translate(-50%, -40%) scale(0.92);
-        animation: ksg-context-hit-pop 900ms cubic-bezier(0.18, 0.9, 0.25, 1) forwards;
+        transform: translate(44px, -50%) scale(0.72);
+        transform-origin: right center;
+        animation: ksg-context-hit-pop 3000ms cubic-bezier(0.16, 0.84, 0.24, 1) forwards;
+        pointer-events: none;
         white-space: nowrap;
         will-change: opacity, transform;
       }
@@ -158,15 +160,19 @@
       @keyframes ksg-context-hit-pop {
         0% {
           opacity: 0;
-          transform: translate(-50%, -20%) scale(0.88);
+          transform: translate(44px, -50%) scale(0.72);
         }
-        16% {
+        12% {
           opacity: 1;
-          transform: translate(-50%, -70%) scale(1.08);
+          transform: translate(8px, -50%) scale(1);
+        }
+        72% {
+          opacity: 1;
+          transform: translate(-128px, -50%) scale(1.82);
         }
         100% {
           opacity: 0;
-          transform: translate(-50%, -190%) scale(0.98);
+          transform: translate(-176px, -50%) scale(2.08);
         }
       }
     `;
@@ -222,12 +228,12 @@
 
     const pop = document.createElement("div");
     pop.className = "ksg-context-hit-pop";
-    pop.textContent = `-${compactNumber(deltaTokens)}`;
+    pop.textContent = `-${Math.round(deltaTokens).toLocaleString("en-US")} Tokens`;
     root.appendChild(pop);
 
     window.setTimeout(() => {
       pop.remove();
-    }, 950);
+    }, 3100);
   }
 
   function makeReading(percent, source, raw, used, limit) {
