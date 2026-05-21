@@ -4,7 +4,7 @@
   const STYLE_ID = "ksg-codex-context-usage-meter-style";
   const ROOT_ID = "ksg-codex-context-usage-meter";
   const CAPTURE_STATE_KEY = "__ksgCodexContextUsageMeterCaptureState";
-  const SCRIPT_VERSION = 23;
+  const SCRIPT_VERSION = 25;
   const UPDATE_INTERVAL_MS = 5000;
   const SLOW_SCAN_INTERVAL_MS = 30000;
   const SWITCH_RETRY_WINDOW_MS = 8000;
@@ -148,8 +148,8 @@
         background: linear-gradient(90deg, #fb7185, #ef4444);
       }
 
-      #${ROOT_ID}[data-known="false"] {
-        opacity: 0.78;
+      #${ROOT_ID}[hidden] {
+        display: none !important;
       }
 
       #${ROOT_ID} .ksg-context-hit-pop {
@@ -208,7 +208,7 @@
     root.dataset.level = "normal";
     root.innerHTML = `
       <div class="ksg-context-meter-row">
-        <span class="ksg-context-meter-value">Context Used --</span>
+        <span class="ksg-context-meter-value">Context Left --</span>
       </div>
       <div class="ksg-context-meter-track">
         <div class="ksg-context-meter-fill"></div>
@@ -1781,14 +1781,17 @@
       if (root.dataset.known !== "false") root.dataset.known = "false";
       if (root.dataset.level !== "normal") root.dataset.level = "normal";
       if (root.title !== title) root.title = title;
-      if (value.textContent !== "Context Used --") value.textContent = "Context Used --";
+      if (value.textContent !== "Context Left --") value.textContent = "Context Left --";
       if (fill.style.width !== "0%") fill.style.width = "0%";
+      root.hidden = true;
+      root.querySelectorAll(".ksg-context-hit-pop").forEach((node) => node.remove());
       return;
     }
 
     state.lastReading = reading;
 
-    const percentText = reading.percent.toFixed(1);
+    const leftPercent = clampPercent(100 - reading.percent);
+    const percentText = leftPercent.toFixed(1);
     const details =
       reading.used != null && reading.limit != null
         ? ` ${compactNumber(reading.used)} / ${compactNumber(reading.limit)}`
@@ -1805,12 +1808,13 @@
       state.lastAnimatedUsedByConversationId.set(readingConversationId, reading.used);
     }
 
-    const level = reading.percent >= 90 ? "danger" : reading.percent >= 75 ? "warn" : "normal";
+    const level = leftPercent <= 10 ? "danger" : leftPercent <= 25 ? "warn" : "normal";
     const title = `Source: ${reading.source}${reading.raw ? ` | ${reading.raw}` : ""}`;
-    const text = `Context Used ${percentText}%${details}`;
-    const width = `${reading.percent.toFixed(1)}%`;
+    const text = `Context Left ${percentText}%${details}`;
+    const width = `${leftPercent.toFixed(1)}%`;
 
     if (root.dataset.known !== "true") root.dataset.known = "true";
+    if (root.hidden) root.hidden = false;
     if (root.dataset.level !== level) root.dataset.level = level;
     if (root.title !== title) root.title = title;
     if (value.textContent !== text) value.textContent = text;
