@@ -4,7 +4,7 @@
   const STYLE_ID = "codex-context-meter-style";
   const ROOT_ID = "codex-context-meter";
   const CAPTURE_STATE_KEY = "__codexContextMeterCaptureState";
-  const SCRIPT_VERSION = 30;
+  const SCRIPT_VERSION = 32;
   const UPDATE_INTERVAL_MS = 5000;
   const SLOW_SCAN_INTERVAL_MS = 30000;
   const SWITCH_RETRY_WINDOW_MS = 8000;
@@ -14,6 +14,13 @@
   const MUTATION_UPDATE_DELAY_MS = 500;
   const ACTIVE_CONVERSATION_LOOKUP_CACHE_MS = 250;
   const APP_SIGNAL_READING_CACHE_MS = 120;
+  // 以下限额只约束兜底扫描；主路径读 app signal / 已缓存读数，不受这些值影响。
+  const EXPENSIVE_FALLBACK_INTERVAL_MS = 2500;
+  const REACT_HOST_SCAN_LIMIT = 180;
+  const STATUS_TEXT_NODE_SCAN_LIMIT = 1200;
+  const DOM_ATTRIBUTE_SCAN_LIMIT = 500;
+  const DOM_TEXT_PART_LIMIT = 120;
+  const WINDOW_KEY_CACHE_MS = 10000;
   const MAX_TEXT_LENGTH = 120000;
   const MAX_CAPTURE_TEXT_LENGTH = 2000000;
   const CAPTURE_TEXT_HINT_RE = /context|token|usage|latestTokenUsageInfo|window|budget|remaining|上下文|令牌|使用|窗口/i;
@@ -77,6 +84,12 @@
     appSignalCachedReading: null,
     appSignalCachedConversationId: null,
     appSignalCachedAt: 0,
+    expensiveFallbackScannedAt: 0,
+    expensiveFallbackConversationId: null,
+    windowContextTextKeys: null,
+    windowContextTextKeysAt: 0,
+    windowUsageKeys: null,
+    windowUsageKeysAt: 0,
   };
 
   function getCaptureState() {
@@ -466,6 +479,8 @@
       state.lastReading = state.readingsByConversationId.get(normalizedConversationId) || null;
       state.lastScanAt = 0;
       state.lastScannedConversationId = null;
+      state.expensiveFallbackScannedAt = 0;
+      state.expensiveFallbackConversationId = null;
       state.navigationPendingUntil = options.pendingNavigation ? Date.now() + NAVIGATION_PENDING_MS : 0;
       state.switchRetryUntil = Date.now() + SWITCH_RETRY_WINDOW_MS;
       scheduleRetryUpdate();
@@ -473,6 +488,16 @@
     }
 
     return false;
+  }
+
+  function retainConversationId(conversationId) {
+    const normalizedConversationId = normalizeConversationId(conversationId);
+    if (!normalizedConversationId) return false;
+
+    state.activeConversationId = normalizedConversationId;
+    state.cachedActiveConversationId = normalizedConversationId;
+    state.activeConversationIdLookupAt = Date.now();
+    return true;
   }
 
   function updateActiveConversationId() {
@@ -487,6 +512,11 @@
       }
 
       activateConversationId(activeConversationId);
+    } else if (hasThreadContentSurface() && state.activeConversationId) {
+      // sidebar 隐藏时 active/current 节点会消失；主会话区仍在时沿用最后确认的会话 ID。
+      retainConversationId(state.activeConversationId);
+    } else if (hasThreadContentSurface() && state.lastReading && state.lastReading.conversationId) {
+      retainConversationId(state.lastReading.conversationId);
     } else {
       state.activeConversationId = null;
       state.lastReading = null;
@@ -1141,11 +1171,31 @@
     if (now - state.appSignalLastLookupAt < 2000) return null;
     state.appSignalLastLookupAt = now;
 
+    // app signal scope 挂在 React 树里；只扫稳定锚点，避免初始化时遍历整页 DOM。
+    const root = document.getElementById("root");
+    const current = document.querySelector(`[aria-current="page"]`);
+    const activeThread = document.querySelector(`[data-app-action-sidebar-thread-active="true"]`);
     const nodes = [
-      document.getElementById("root"),
+      root,
+      current,
+      activeThread,
+      current && current.closest("[data-app-action-sidebar-thread-id]"),
+      activeThread && activeThread.closest("[data-app-action-sidebar-thread-id]"),
       document.body,
       document.documentElement,
-      ...Array.from(document.querySelectorAll("body *")).slice(0, 350),
+      ...(root
+        ? Array.from(root.querySelectorAll(
+            [
+              "[data-app-action-sidebar-thread-id]",
+              "[data-testid*='thread' i]",
+              "[data-testid*='conversation' i]",
+              "[data-testid*='message' i]",
+              "[data-message-author-role]",
+              "main",
+              "article",
+            ].join(","),
+          )).slice(0, REACT_HOST_SCAN_LIMIT)
+        : []),
     ].filter(Boolean);
 
     const seen = new WeakSet();
@@ -1353,6 +1403,11 @@
     acceptReading(parsePayloadText(text, source, ownerConversationId));
   }
 
+  function hasCaptureHintText(text) {
+    if (typeof text !== "string" || text.length > MAX_CAPTURE_TEXT_LENGTH) return false;
+    return CAPTURE_TEXT_HINT_RE.test(text);
+  }
+
   function getRequestConversationId(input) {
     const direct = normalizeConversationId(input && (input.url || input.href || input));
     if (direct) return direct;
@@ -1420,7 +1475,7 @@
       socket.addEventListener("message", (event) => {
         try {
           if (typeof event.data === "string") {
-            if (!CAPTURE_TEXT_HINT_RE.test(event.data)) return;
+            if (!hasCaptureHintText(event.data)) return;
 
             const currentCaptureState = window[CAPTURE_STATE_KEY];
             if (currentCaptureState && typeof currentCaptureState.inspectText === "function") {
@@ -1469,7 +1524,7 @@
           (typeof currentCaptureState.inspectValue === "function"
             ? currentCaptureState.inspectValue(event.data, "message", state.activeConversationId || readActiveConversationId())
             : null) ||
-          (typeof event.data === "string" && typeof currentCaptureState.parsePayloadText === "function"
+          (hasCaptureHintText(event.data) && typeof currentCaptureState.parsePayloadText === "function"
             ? currentCaptureState.parsePayloadText(event.data, "message", state.activeConversationId || readActiveConversationId())
             : null);
 
@@ -1521,18 +1576,37 @@
     );
   }
 
+  function shouldIgnoreMutationTarget(element) {
+    if (!element || element.nodeType !== Node.ELEMENT_NODE) return false;
+    if (element.closest(`#${ROOT_ID}`)) return true;
+    return !!element.closest(
+      [
+        `[data-thread-find-target]`,
+        `[data-message-author-role]`,
+        `[data-testid*="message" i]`,
+        `article`,
+      ].join(","),
+    );
+  }
+
   // 兜底读取已渲染的 /status 输出；排除会话正文，避免把用户消息里的 Context 行当成状态。
   function collectStatusCommandText() {
     const chunks = [];
-    const nodes = document.querySelectorAll("body *");
+    const walker = document.createTreeWalker(document.body || document.documentElement, NodeFilter.SHOW_ELEMENT);
+    let visited = 0;
+    let node = walker.nextNode();
 
-    for (const node of nodes) {
+    while (node && visited < STATUS_TEXT_NODE_SCAN_LIMIT) {
+      visited += 1;
       if (chunks.length >= 12) break;
-      if (node.id === ROOT_ID || node.closest(`#${ROOT_ID}`)) continue;
-      if (isConversationContent(node)) continue;
-      if (!isVisibleElement(node)) continue;
+      const current = node;
+      node = walker.nextNode();
 
-      const text = (node.innerText || node.textContent || "").replace(/\s+/g, " ").trim();
+      if (current.id === ROOT_ID || current.closest(`#${ROOT_ID}`)) continue;
+      if (isConversationContent(current)) continue;
+      if (!isVisibleElement(current)) continue;
+
+      const text = (current.textContent || "").replace(/\s+/g, " ").trim();
       if (text.length < 20 || text.length > 1800) continue;
       if (!/\bStatus\b/i.test(text) || !/\bContext\s*:\s*\d{1,3}(?:\.\d+)?\s*%/i.test(text)) continue;
       if (!/\bSession\s*:|\b5h limit\s*:|\b7d limit\s*:/i.test(text)) continue;
@@ -1545,9 +1619,12 @@
 
   function collectDomText() {
     const parts = [];
+    let scanned = 0;
 
     const attrNodes = document.querySelectorAll("[aria-label], [title], [data-testid], [data-test-id]");
     for (const node of attrNodes) {
+      if (scanned >= DOM_ATTRIBUTE_SCAN_LIMIT || parts.length >= DOM_TEXT_PART_LIMIT) break;
+      scanned += 1;
       if (node.closest(`#${ROOT_ID}`)) continue;
 
       for (const attr of ["aria-label", "title", "data-testid", "data-test-id"]) {
@@ -1555,7 +1632,7 @@
         if (value && contextTerms.test(value)) parts.push(value);
       }
 
-      const text = (node.innerText || node.textContent || "").trim();
+      const text = (node.textContent || "").trim();
       if (text && text.length <= 500 && contextTerms.test(text)) {
         parts.push(text);
       }
@@ -1656,10 +1733,13 @@
   function scanLikelyWindowState() {
     const parts = [];
     const seen = new WeakSet();
+    const now = Date.now();
+    if (!state.windowContextTextKeys || now - state.windowContextTextKeysAt > WINDOW_KEY_CACHE_MS) {
+      state.windowContextTextKeys = Object.keys(window).filter((key) => contextTerms.test(key));
+      state.windowContextTextKeysAt = now;
+    }
 
-    for (const key of Object.keys(window)) {
-      if (!contextTerms.test(key)) continue;
-
+    for (const key of state.windowContextTextKeys) {
       let value;
       try {
         value = window[key];
@@ -1674,11 +1754,25 @@
     return parts.join("\n").slice(0, MAX_TEXT_LENGTH);
   }
 
+  // React 兜底只检查可能承载线程/消息状态的宿主节点，避免遍历全部 body 元素。
   function scanReactProps() {
     const parts = [];
     const seen = new WeakSet();
-    const nodes = document.querySelectorAll("body *");
-    const limit = Math.min(nodes.length, 700);
+    const root = document.getElementById("root");
+    const nodes = root
+      ? root.querySelectorAll(
+          [
+            "[data-app-action-sidebar-thread-id]",
+            "[data-testid*='thread' i]",
+            "[data-testid*='conversation' i]",
+            "[data-testid*='message' i]",
+            "[data-message-author-role]",
+            "main",
+            "article",
+          ].join(","),
+        )
+      : [];
+    const limit = Math.min(nodes.length, REACT_HOST_SCAN_LIMIT);
 
     for (let index = 0; index < limit && parts.length < 160; index += 1) {
       const node = nodes[index];
@@ -1707,12 +1801,15 @@
 
   function scanWindowForContextUsage(activeConversationId) {
     const seen = new WeakSet();
+    const now = Date.now();
+    if (!state.windowUsageKeys || now - state.windowUsageKeysAt > WINDOW_KEY_CACHE_MS) {
+      state.windowUsageKeys = Object.keys(window).filter((key) =>
+        /codex|thread|token|usage|context|store|query|cache|notification|message/i.test(key),
+      );
+      state.windowUsageKeysAt = now;
+    }
 
-    for (const key of Object.keys(window)) {
-      if (!/codex|thread|token|usage|context|store|query|cache|notification|message/i.test(key)) {
-        continue;
-      }
-
+    for (const key of state.windowUsageKeys) {
       let value;
       try {
         value = window[key];
@@ -1733,7 +1830,17 @@
     const cachedReading = activeConversationId ? state.readingsByConversationId.get(activeConversationId) : null;
     if (cachedReading) return cachedReading;
 
-    if (!activeConversationId) return null;
+    if (!activeConversationId) {
+      const appSignalReading = scanAppSignalContextUsage(null);
+      if (appSignalReading && appSignalReading.conversationId) {
+        retainConversationId(appSignalReading.conversationId);
+        state.switchRetryUntil = 0;
+        clearRetryUpdate();
+        return appSignalReading;
+      }
+
+      return null;
+    }
 
     if (state.lastReading && state.lastReading.conversationId && conversationIdsMatch(activeConversationId, state.lastReading.conversationId)) {
       return state.lastReading;
@@ -1745,12 +1852,20 @@
     if (!activeChangedSinceScan && !inSwitchRetryWindow && now - state.lastScanAt < SLOW_SCAN_INTERVAL_MS) {
       return null;
     }
+    // 会话切换初期允许快速兜底；同一会话内的昂贵扫描按窗口限频。
+    const canRunExpensiveFallback =
+      activeChangedSinceScan ||
+      !conversationIdsMatch(activeConversationId, state.expensiveFallbackConversationId) ||
+      now - state.expensiveFallbackScannedAt >= EXPENSIVE_FALLBACK_INTERVAL_MS;
 
     state.lastScannedConversationId = activeConversationId;
     state.lastScanAt = now;
 
     const appSignalReading = scanAppSignalContextUsage(activeConversationId);
     if (appSignalReading) {
+      if (!activeConversationId && appSignalReading.conversationId) {
+        retainConversationId(appSignalReading.conversationId);
+      }
       state.switchRetryUntil = 0;
       clearRetryUpdate();
       return appSignalReading;
@@ -1763,35 +1878,38 @@
       return statusReactReading;
     }
 
-    const windowReading = scanWindowForContextUsage(activeConversationId);
-    if (windowReading) {
-      state.switchRetryUntil = 0;
-      clearRetryUpdate();
-      return windowReading;
-    }
+    if (canRunExpensiveFallback) {
+      state.expensiveFallbackScannedAt = now;
+      state.expensiveFallbackConversationId = activeConversationId;
 
-    const statusReading = parseTextForReading(collectStatusCommandText(), "status");
-    if (statusReading) {
-      state.switchRetryUntil = 0;
-      clearRetryUpdate();
-      return statusReading;
-    }
+      const windowReading = scanWindowForContextUsage(activeConversationId);
+      if (windowReading) {
+        state.switchRetryUntil = 0;
+        clearRetryUpdate();
+        return windowReading;
+      }
 
-    const localReading = parseTextForReading(safeStorageText(localStorage), "localStorage");
-    if (localReading) {
-      state.switchRetryUntil = 0;
-      clearRetryUpdate();
-      return localReading;
-    }
+      const statusReading = parseTextForReading(collectStatusCommandText(), "status");
+      if (statusReading) {
+        state.switchRetryUntil = 0;
+        clearRetryUpdate();
+        return statusReading;
+      }
 
-    const sessionReading = parseTextForReading(safeStorageText(sessionStorage), "sessionStorage");
-    if (sessionReading) {
-      state.switchRetryUntil = 0;
-      clearRetryUpdate();
-      return sessionReading;
-    }
+      const localReading = parseTextForReading(safeStorageText(localStorage), "localStorage");
+      if (localReading) {
+        state.switchRetryUntil = 0;
+        clearRetryUpdate();
+        return localReading;
+      }
 
-    if (!inSwitchRetryWindow) {
+      const sessionReading = parseTextForReading(safeStorageText(sessionStorage), "sessionStorage");
+      if (sessionReading) {
+        state.switchRetryUntil = 0;
+        clearRetryUpdate();
+        return sessionReading;
+      }
+
       const domReading = parseTextForReading(collectDomText(), "dom");
       if (domReading) {
         state.switchRetryUntil = 0;
@@ -1936,7 +2054,7 @@
         const target = mutation.target && mutation.target.nodeType === Node.ELEMENT_NODE
           ? mutation.target
           : mutation.target && mutation.target.parentElement;
-        if (target && target.closest(`#${ROOT_ID}`)) continue;
+        if (shouldIgnoreMutationTarget(target)) continue;
 
         scheduleUpdate(MUTATION_UPDATE_DELAY_MS);
         return;
