@@ -4,17 +4,19 @@
   const STYLE_ID = "ksg-codex-context-usage-meter-style";
   const ROOT_ID = "ksg-codex-context-usage-meter";
   const CAPTURE_STATE_KEY = "__ksgCodexContextUsageMeterCaptureState";
-  const SCRIPT_VERSION = 21;
-  const UPDATE_INTERVAL_MS = 10000;
+  const SCRIPT_VERSION = 23;
+  const UPDATE_INTERVAL_MS = 5000;
   const SLOW_SCAN_INTERVAL_MS = 30000;
   const SWITCH_RETRY_WINDOW_MS = 8000;
   const SWITCH_RETRY_INTERVAL_MS = 700;
   const NAVIGATION_PENDING_MS = 1500;
-  const CAPTURE_UPDATE_DELAY_MS = 120;
-  const MUTATION_UPDATE_DELAY_MS = 900;
+  const CAPTURE_UPDATE_DELAY_MS = 30;
+  const MUTATION_UPDATE_DELAY_MS = 500;
   const ACTIVE_CONVERSATION_LOOKUP_CACHE_MS = 250;
+  const APP_SIGNAL_READING_CACHE_MS = 120;
   const MAX_TEXT_LENGTH = 120000;
   const MAX_CAPTURE_TEXT_LENGTH = 2000000;
+  const CAPTURE_TEXT_HINT_RE = /context|token|usage|latestTokenUsageInfo|window|budget|remaining|上下文|令牌|使用|窗口/i;
 
   if (window[INSTALL_KEY]) {
     const api = window[API_KEY];
@@ -58,6 +60,9 @@
     appSignalModules: null,
     appSignalModulesPromise: null,
     appSignalLastLookupAt: 0,
+    appSignalCachedReading: null,
+    appSignalCachedConversationId: null,
+    appSignalCachedAt: 0,
   };
 
   function getCaptureState() {
@@ -1193,6 +1198,17 @@
   }
 
   function scanAppSignalContextUsage(activeConversationId) {
+    const now = Date.now();
+    const requestedConversationId = normalizeConversationId(activeConversationId);
+    if (
+      state.appSignalCachedReading &&
+      requestedConversationId &&
+      conversationIdsMatch(requestedConversationId, state.appSignalCachedConversationId) &&
+      now - state.appSignalCachedAt < APP_SIGNAL_READING_CACHE_MS
+    ) {
+      return state.appSignalCachedReading;
+    }
+
     const modules = ensureAppSignalModules();
     if (!modules || !modules.appServerSignals) return null;
 
@@ -1207,7 +1223,12 @@
     const latestTokenUsageSelector = modules.appServerSignals.B;
     const tokenUsage = readSignalValue(scope, latestTokenUsageSelector, conversationId);
     const reading = parseStatusContextUsageObject(tokenUsage, "app-signal", conversationId);
-    if (reading) return reading;
+    if (reading) {
+      state.appSignalCachedReading = reading;
+      state.appSignalCachedConversationId = conversationId;
+      state.appSignalCachedAt = now;
+      return reading;
+    }
 
     return null;
   }
@@ -1264,6 +1285,7 @@
 
   function inspectCandidateText(text, source, ownerConversationId) {
     if (!text || text.length > MAX_CAPTURE_TEXT_LENGTH) return;
+    if (!CAPTURE_TEXT_HINT_RE.test(text)) return;
 
     acceptReading(parsePayloadText(text, source, ownerConversationId));
   }
@@ -1275,15 +1297,27 @@
     return state.activeConversationId || readActiveConversationId();
   }
 
+  function getNativeFetch(captureState) {
+    return captureState.nativeFetch || window.fetch;
+  }
+
+  function getNativeWebSocket(captureState) {
+    return captureState.NativeWebSocket || window.WebSocket;
+  }
+
   function installFetchCapture() {
     const captureState = getCaptureState();
     if (captureState.fetchVersion === SCRIPT_VERSION || typeof window.fetch !== "function") return;
 
-    const originalFetch = window.fetch;
+    const originalFetch = getNativeFetch(captureState);
+    captureState.nativeFetch = originalFetch;
     window.fetch = function ksgContextMeterFetch(...args) {
       const requestConversationId = getRequestConversationId(args[0]);
       return originalFetch.apply(this, args).then((response) => {
         try {
+          const urlText = String(args[0] && (args[0].url || args[0].href || args[0]) || response.url || "");
+          if (urlText && !CAPTURE_TEXT_HINT_RE.test(urlText)) return response;
+
           const contentType = response.headers && response.headers.get("content-type");
           const contentLength = response.headers && Number(response.headers.get("content-length"));
           const isTextLike = !contentType || /json|text|event-stream|x-ndjson/i.test(contentType);
@@ -1315,13 +1349,16 @@
     const captureState = getCaptureState();
     if (captureState.webSocketVersion === SCRIPT_VERSION || typeof window.WebSocket !== "function") return;
 
-    const NativeWebSocket = window.WebSocket;
+    const NativeWebSocket = getNativeWebSocket(captureState);
+    captureState.NativeWebSocket = NativeWebSocket;
 
     function MeterWebSocket(...args) {
       const socket = new NativeWebSocket(...args);
       socket.addEventListener("message", (event) => {
         try {
           if (typeof event.data === "string") {
+            if (!CAPTURE_TEXT_HINT_RE.test(event.data)) return;
+
             const currentCaptureState = window[CAPTURE_STATE_KEY];
             if (currentCaptureState && typeof currentCaptureState.inspectText === "function") {
               currentCaptureState.inspectText(event.data, "websocket", state.activeConversationId || readActiveConversationId());
