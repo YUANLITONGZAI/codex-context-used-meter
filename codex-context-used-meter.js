@@ -1,10 +1,10 @@
 (() => {
-  const INSTALL_KEY = "__ksgCodexContextUsageMeterInstalled";
-  const API_KEY = "__ksgCodexContextUsageMeter";
-  const STYLE_ID = "ksg-codex-context-usage-meter-style";
-  const ROOT_ID = "ksg-codex-context-usage-meter";
-  const CAPTURE_STATE_KEY = "__ksgCodexContextUsageMeterCaptureState";
-  const SCRIPT_VERSION = 25;
+  const INSTALL_KEY = "__codexContextMeterInstalled";
+  const API_KEY = "__codexContextMeter";
+  const STYLE_ID = "codex-context-meter-style";
+  const ROOT_ID = "codex-context-meter";
+  const CAPTURE_STATE_KEY = "__codexContextMeterCaptureState";
+  const SCRIPT_VERSION = 26;
   const UPDATE_INTERVAL_MS = 5000;
   const SLOW_SCAN_INTERVAL_MS = 30000;
   const SWITCH_RETRY_WINDOW_MS = 8000;
@@ -17,6 +17,20 @@
   const MAX_TEXT_LENGTH = 120000;
   const MAX_CAPTURE_TEXT_LENGTH = 2000000;
   const CAPTURE_TEXT_HINT_RE = /context|token|usage|latestTokenUsageInfo|window|budget|remaining|上下文|令牌|使用|窗口/i;
+
+  for (const key of Object.keys(window)) {
+    if (!/CodexContextUsageMeter(?:Installed)?$/.test(key)) continue;
+
+    const legacyApi = window[key];
+    if (legacyApi && typeof legacyApi.destroy === "function") {
+      legacyApi.destroy();
+    }
+    delete window[key];
+  }
+
+  const legacyRootId = ["codex", "context", "usage", "meter"].join("-");
+  document.getElementById(legacyRootId)?.remove();
+  document.getElementById(`${legacyRootId}-style`)?.remove();
 
   if (window[INSTALL_KEY]) {
     const api = window[API_KEY];
@@ -107,7 +121,7 @@
         backdrop-filter: blur(10px);
       }
 
-      #${ROOT_ID} .ksg-context-meter-row {
+      #${ROOT_ID} .ccm-row {
         display: flex;
         align-items: center;
         justify-content: center;
@@ -115,7 +129,7 @@
         white-space: nowrap;
       }
 
-      #${ROOT_ID} .ksg-context-meter-value {
+      #${ROOT_ID} .ccm-value {
         color: rgba(255, 255, 255, 0.98);
         font-weight: 650;
         font-variant-numeric: tabular-nums;
@@ -124,7 +138,7 @@
         text-overflow: ellipsis;
       }
 
-      #${ROOT_ID} .ksg-context-meter-track {
+      #${ROOT_ID} .ccm-track {
         width: 100%;
         height: 7px;
         overflow: hidden;
@@ -132,7 +146,7 @@
         background: rgba(255, 255, 255, 0.16);
       }
 
-      #${ROOT_ID} .ksg-context-meter-fill {
+      #${ROOT_ID} .ccm-fill {
         width: 0%;
         height: 100%;
         border-radius: inherit;
@@ -140,11 +154,11 @@
         transition: width 180ms ease, background 180ms ease;
       }
 
-      #${ROOT_ID}[data-level="warn"] .ksg-context-meter-fill {
+      #${ROOT_ID}[data-level="warn"] .ccm-fill {
         background: linear-gradient(90deg, #f59e0b, #f97316);
       }
 
-      #${ROOT_ID}[data-level="danger"] .ksg-context-meter-fill {
+      #${ROOT_ID}[data-level="danger"] .ccm-fill {
         background: linear-gradient(90deg, #fb7185, #ef4444);
       }
 
@@ -152,7 +166,7 @@
         display: none !important;
       }
 
-      #${ROOT_ID} .ksg-context-hit-pop {
+      #${ROOT_ID} .ccm-hit-pop {
         position: absolute;
         right: calc(100% + 10px);
         top: 50%;
@@ -165,13 +179,13 @@
         text-shadow: 0 1px 0 rgba(0, 0, 0, 0.45), 0 0 12px rgba(251, 113, 133, 0.5);
         transform: translate(44px, -50%) scale(0.72);
         transform-origin: right center;
-        animation: ksg-context-hit-pop 3000ms cubic-bezier(0.16, 0.84, 0.24, 1) forwards;
+        animation: ccm-hit-pop 3000ms cubic-bezier(0.16, 0.84, 0.24, 1) forwards;
         pointer-events: none;
         white-space: nowrap;
         will-change: opacity, transform;
       }
 
-      @keyframes ksg-context-hit-pop {
+      @keyframes ccm-hit-pop {
         0% {
           opacity: 0;
           transform: translate(44px, -50%) scale(0.72);
@@ -197,8 +211,8 @@
     let root = document.getElementById(ROOT_ID);
     if (root) {
       state.root = root;
-      state.value = root.querySelector(".ksg-context-meter-value");
-      state.fill = root.querySelector(".ksg-context-meter-fill");
+      state.value = root.querySelector(".ccm-value");
+      state.fill = root.querySelector(".ccm-fill");
       return root;
     }
 
@@ -207,17 +221,17 @@
     root.dataset.known = "false";
     root.dataset.level = "normal";
     root.innerHTML = `
-      <div class="ksg-context-meter-row">
-        <span class="ksg-context-meter-value">Context Left --</span>
+      <div class="ccm-row">
+        <span class="ccm-value">Context Left --</span>
       </div>
-      <div class="ksg-context-meter-track">
-        <div class="ksg-context-meter-fill"></div>
+      <div class="ccm-track">
+        <div class="ccm-fill"></div>
       </div>
     `;
     document.body.appendChild(root);
     state.root = root;
-    state.value = root.querySelector(".ksg-context-meter-value");
-    state.fill = root.querySelector(".ksg-context-meter-fill");
+    state.value = root.querySelector(".ccm-value");
+    state.fill = root.querySelector(".ccm-fill");
     return root;
   }
 
@@ -249,7 +263,7 @@
     if (!root || !Number.isFinite(deltaTokens) || deltaTokens <= 0) return;
 
     const pop = document.createElement("div");
-    pop.className = "ksg-context-hit-pop";
+    pop.className = "ccm-hit-pop";
     pop.textContent = `-${Math.round(deltaTokens).toLocaleString("en-US")} Tokens`;
     root.appendChild(pop);
 
@@ -1311,7 +1325,7 @@
 
     const originalFetch = getNativeFetch(captureState);
     captureState.nativeFetch = originalFetch;
-    window.fetch = function ksgContextMeterFetch(...args) {
+    window.fetch = function codexContextMeterFetch(...args) {
       const requestConversationId = getRequestConversationId(args[0]);
       return originalFetch.apply(this, args).then((response) => {
         try {
@@ -1342,7 +1356,7 @@
     };
 
     captureState.fetchVersion = SCRIPT_VERSION;
-    window.__ksgCodexContextUsageMeterFetchPatched = true;
+    window.__codexContextMeterFetchPatched = true;
   }
 
   function installWebSocketCapture() {
@@ -1388,7 +1402,7 @@
     MeterWebSocket.CLOSED = NativeWebSocket.CLOSED;
     window.WebSocket = MeterWebSocket;
     captureState.webSocketVersion = SCRIPT_VERSION;
-    window.__ksgCodexContextUsageMeterWebSocketPatched = true;
+    window.__codexContextMeterWebSocketPatched = true;
   }
 
   function installPostMessageCapture() {
@@ -1420,7 +1434,7 @@
 
     window.addEventListener("message", captureState.messageListener, true);
     captureState.messageVersion = SCRIPT_VERSION;
-    window.__ksgCodexContextUsageMeterPostMessagePatched = true;
+    window.__codexContextMeterPostMessagePatched = true;
   }
 
   function parseTextForReading(text, source) {
@@ -1767,8 +1781,8 @@
     if (!document.body) return;
 
     const root = ensureRoot();
-    const value = state.value || root.querySelector(".ksg-context-meter-value");
-    const fill = state.fill || root.querySelector(".ksg-context-meter-fill");
+    const value = state.value || root.querySelector(".ccm-value");
+    const fill = state.fill || root.querySelector(".ccm-fill");
     const reading = detectReading();
     const activeConversationId = state.activeConversationId || readActiveConversationId();
 
@@ -1784,7 +1798,7 @@
       if (value.textContent !== "Context Left --") value.textContent = "Context Left --";
       if (fill.style.width !== "0%") fill.style.width = "0%";
       root.hidden = true;
-      root.querySelectorAll(".ksg-context-hit-pop").forEach((node) => node.remove());
+      root.querySelectorAll(".ccm-hit-pop").forEach((node) => node.remove());
       return;
     }
 
@@ -1942,3 +1956,4 @@
   installObserver();
   state.timer = window.setInterval(updateMeter, UPDATE_INTERVAL_MS);
 })();
+
