@@ -5,7 +5,7 @@
   const STYLE_ID = "codex-context-meter-style";
   const ROOT_ID = "codex-context-meter";
   const CAPTURE_STATE_KEY = "__codexContextMeterCaptureState";
-  const SCRIPT_VERSION = 32;
+  const SCRIPT_VERSION = 33;
   const UPDATE_INTERVAL_MS = 5000;
   const SLOW_SCAN_INTERVAL_MS = 30000;
   const SWITCH_RETRY_WINDOW_MS = 8000;
@@ -15,6 +15,7 @@
   const MUTATION_UPDATE_DELAY_MS = 500;
   const ACTIVE_CONVERSATION_LOOKUP_CACHE_MS = 250;
   const APP_SIGNAL_READING_CACHE_MS = 120;
+  const APP_SIGNAL_IMPORT_GRACE_MS = 600;
   // 以下限额只约束兜底扫描；主路径读 app signal / 已缓存读数，不受这些值影响。
   const EXPENSIVE_FALLBACK_INTERVAL_MS = 2500;
   const REACT_HOST_SCAN_LIMIT = 180;
@@ -25,6 +26,66 @@
   const MAX_TEXT_LENGTH = 120000;
   const MAX_CAPTURE_TEXT_LENGTH = 2000000;
   const CAPTURE_TEXT_HINT_RE = /context|token|usage|latestTokenUsageInfo|window|budget|remaining|上下文|令牌|使用|窗口/i;
+  const THREAD_CONTENT_SELECTOR = [
+    '[data-app-shell-main-content-layout*="thread"]',
+    '[class*="thread-edge"]',
+    '[class*="transcript"]',
+    '[data-testid*="thread"], [data-test-id*="thread"]',
+    '[data-testid*="conversation"], [data-test-id*="conversation"]',
+  ].join(",");
+  const REACT_STATE_HOST_SELECTOR = [
+    "[data-app-action-sidebar-thread-id]",
+    "[data-testid*='thread' i]",
+    "[data-testid*='conversation' i]",
+    "[data-testid*='message' i]",
+    "[data-message-author-role]",
+    "main",
+    "article",
+  ].join(",");
+  const CONVERSATION_CONTENT_SELECTOR = [
+    `[data-thread-find-target]`,
+    `[data-message-author-role]`,
+    `[data-testid*="conversation" i]`,
+    `[data-testid*="message" i]`,
+    `article`,
+  ].join(",");
+  const MESSAGE_MUTATION_SELECTOR = [
+    `[data-thread-find-target]`,
+    `[data-message-author-role]`,
+    `[data-testid*="message" i]`,
+    `article`,
+  ].join(",");
+  const PREFERRED_STATUS_KEYS = [
+    "contextUsage",
+    "context_usage",
+    "tokenUsage",
+    "token_usage",
+    "usage",
+    "data",
+    "props",
+    "memoizedState",
+    "memoizedProps",
+    "pendingProps",
+    "updateQueue",
+    "dependencies",
+    "alternate",
+    "return",
+    "child",
+    "sibling",
+    "stateNode",
+    "current",
+    "value",
+    "store",
+    "atom",
+    "atoms",
+    "map",
+    "cache",
+  ];
+  const PREFERRED_STATUS_KEY_SET = new Set(PREFERRED_STATUS_KEYS);
+  const STATUS_TREE_KEY_RE = /context|usage|status|thread|conversation|token|query|data|props|memoized|pending|return|child|sibling|state|value|current|store|atom|map|cache/i;
+  const APP_SIGNAL_SCOPE_KEY_RE = /memoized|pending|dependencies|firstContext|context|value|current|return|child|sibling|state|store|node|chain|scope|provider|props|query|cache/i;
+  const VALUE_TEXT_KEY_RE = /context|token|tokens|usage|window|budget|remaining|上下文|令牌|使用|窗口/i;
+  const REACT_PRIVATE_KEY_RE = /^__react(?:Props|Fiber|Container)\$/;
 
   for (const key of Object.keys(window)) {
     if (!/CodexContextUsageMeter(?:Installed)?$/.test(key)) continue;
@@ -85,12 +146,20 @@
     appSignalCachedReading: null,
     appSignalCachedConversationId: null,
     appSignalCachedAt: 0,
+    appSignalModulesRequestedAt: 0,
+    waitingForAppSignalModules: false,
     expensiveFallbackScannedAt: 0,
     expensiveFallbackConversationId: null,
     windowContextTextKeys: null,
     windowContextTextKeysAt: 0,
     windowUsageKeys: null,
     windowUsageKeysAt: 0,
+    reactPrivateKeyCache: new WeakMap(),
+    scanGeneration: 0,
+    filteredReflectKeyCache: new WeakMap(),
+    appSignalSkipGeneration: new WeakMap(),
+    threadContentLookupAt: 0,
+    threadContentLookupResult: false,
   };
 
   function getCaptureState() {
@@ -294,20 +363,28 @@
     }, 3100);
   }
 
+  function hasDescendant(element, selector) {
+    return !!(element && element.querySelector(selector));
+  }
+
   // 只把主会话内容区当作可显示区域；Codex App DOM 更新后，优先从这里重找 thread/transcript 锚点。
   function hasThreadContentSurface() {
     if (!isConversationWindow()) return false;
 
-    const main = document.querySelector("main");
-    if (!main) return false;
+    const now = Date.now();
+    if (now - state.threadContentLookupAt < ACTIVE_CONVERSATION_LOOKUP_CACHE_MS) {
+      return state.threadContentLookupResult;
+    }
 
-    return !!(
-      main.querySelector('[data-app-shell-main-content-layout*="thread"]') ||
-      main.querySelector('[class*="thread-edge"]') ||
-      main.querySelector('[class*="transcript"]') ||
-      main.querySelector('[data-testid*="thread"], [data-test-id*="thread"]') ||
-      main.querySelector('[data-testid*="conversation"], [data-test-id*="conversation"]')
-    );
+    const main = document.querySelector("main");
+    const result = hasDescendant(main, THREAD_CONTENT_SELECTOR);
+    state.threadContentLookupAt = now;
+    state.threadContentLookupResult = result;
+    return result;
+  }
+
+  function invalidateThreadContentCache() {
+    state.threadContentLookupAt = 0;
   }
 
   // Pet/头像层也运行在 app://-/index.html，需要额外按 route 排除非对话窗口。
@@ -373,11 +450,59 @@
     return reading;
   }
 
+  // React 私有 key 每次构建都会换后缀；按节点缓存 key 列表能避开冷启动时的大量 Reflect.ownKeys。
+  function getReactPrivateKeys(node) {
+    if (!node || (typeof node !== "object" && typeof node !== "function")) return [];
+
+    const cached = state.reactPrivateKeyCache.get(node);
+    if (cached) return cached;
+
+    let keys = [];
+    try {
+      keys = Reflect.ownKeys(node).map(String).filter((key) => REACT_PRIVATE_KEY_RE.test(key));
+    } catch {
+      keys = [];
+    }
+
+    state.reactPrivateKeyCache.set(node, keys);
+    return keys;
+  }
+
+  function getFilteredReflectKeys(value, cacheName, pattern, limit) {
+    if (!value || (typeof value !== "object" && typeof value !== "function")) return [];
+
+    let cache = state.filteredReflectKeyCache.get(value);
+    if (!cache) {
+      cache = {};
+      state.filteredReflectKeyCache.set(value, cache);
+    }
+
+    if (cache[cacheName]) return cache[cacheName];
+
+    let keys = [];
+    try {
+      keys = Reflect.ownKeys(value)
+        .map(String)
+        .filter((key) => pattern.test(key))
+        .slice(0, limit);
+    } catch {
+      keys = [];
+    }
+
+    cache[cacheName] = keys;
+    return keys;
+  }
+
+  // 只缓存对象 key 列表，不缓存属性值；React/store 对象的值会变，key 通常稳定。
+  function getContextValueKeys(value) {
+    return getFilteredReflectKeys(value, "contextValueText", VALUE_TEXT_KEY_RE, 100);
+  }
+
   // Codex 部分会话 ID 只存在于 React 写到 DOM 节点上的私有 props，普通 attribute 读不到。
   function getReactPropValue(node, propName) {
     if (!node) return null;
 
-    for (const key of Reflect.ownKeys(node).map(String)) {
+    for (const key of getReactPrivateKeys(node)) {
       if (!key.startsWith("__reactProps$")) continue;
 
       let props;
@@ -978,40 +1103,11 @@
       return null;
     }
 
-    let keys = [];
-    try {
-      keys = Reflect.ownKeys(value).map(String).slice(0, 120);
-    } catch {
-      return null;
-    }
+    const keys = getFilteredReflectKeys(value, "statusTree", STATUS_TREE_KEY_RE, 120);
+    const keySet = new Set(keys);
 
-    const preferredKeys = [
-      "contextUsage",
-      "context_usage",
-      "usage",
-      "data",
-      "props",
-      "memoizedState",
-      "memoizedProps",
-      "pendingProps",
-      "updateQueue",
-      "dependencies",
-      "alternate",
-      "return",
-      "child",
-      "sibling",
-      "stateNode",
-      "current",
-      "value",
-      "store",
-      "atom",
-      "atoms",
-      "map",
-      "cache",
-    ];
-
-    for (const key of preferredKeys) {
-      if (!keys.includes(key)) continue;
+    for (const key of PREFERRED_STATUS_KEYS) {
+      if (!keySet.has(key)) continue;
 
       let child;
       try {
@@ -1031,10 +1127,7 @@
     }
 
     for (const key of keys) {
-      if (preferredKeys.includes(key)) continue;
-      if (!/context|usage|status|thread|conversation|token|query|data|props|memoized|pending|return|child|sibling|state|value|current|store|atom|map|cache/i.test(key)) {
-        continue;
-      }
+      if (PREFERRED_STATUS_KEY_SET.has(key)) continue;
 
       let child;
       try {
@@ -1071,17 +1164,9 @@
 
     for (let index = 0; index < limit; index += 1) {
       const node = nodes[index];
-      const keys = Reflect.ownKeys(node).map(String);
+      const keys = getReactPrivateKeys(node);
 
       for (const key of keys) {
-        if (
-          !key.startsWith("__reactProps$") &&
-          !key.startsWith("__reactFiber$") &&
-          !key.startsWith("__reactContainer$")
-        ) {
-          continue;
-        }
-
         let value;
         try {
           value = node[key];
@@ -1095,14 +1180,6 @@
     }
 
     return null;
-  }
-
-  function getReflectKeys(value) {
-    try {
-      return Reflect.ownKeys(value).map(String);
-    } catch {
-      return [];
-    }
   }
 
   function isAppSignalScope(value) {
@@ -1120,6 +1197,7 @@
   function findAppSignalScopeInValue(value, depth, seen) {
     if (!value || typeof value !== "object" || depth < 0) return null;
     if (seen.has(value)) return null;
+    if (state.appSignalSkipGeneration.get(value) === state.scanGeneration) return null;
     seen.add(value);
 
     if (isAppSignalScope(value)) return value;
@@ -1148,13 +1226,7 @@
       }
     }
 
-    const keys = getReflectKeys(value)
-      .filter((key) =>
-        /memoized|pending|dependencies|firstContext|context|value|current|return|child|sibling|state|store|node|chain|scope|provider|props|query|cache/i.test(
-          key,
-        ),
-      )
-      .slice(0, 120);
+    const keys = getFilteredReflectKeys(value, "appSignalScope", APP_SIGNAL_SCOPE_KEY_RE, 120);
 
     for (const key of keys) {
       let child;
@@ -1168,6 +1240,7 @@
       if (scope) return scope;
     }
 
+    state.appSignalSkipGeneration.set(value, state.scanGeneration);
     return null;
   }
 
@@ -1191,32 +1264,14 @@
       document.body,
       document.documentElement,
       ...(root
-        ? Array.from(root.querySelectorAll(
-            [
-              "[data-app-action-sidebar-thread-id]",
-              "[data-testid*='thread' i]",
-              "[data-testid*='conversation' i]",
-              "[data-testid*='message' i]",
-              "[data-message-author-role]",
-              "main",
-              "article",
-            ].join(","),
-          )).slice(0, REACT_HOST_SCAN_LIMIT)
+        ? Array.from(root.querySelectorAll(REACT_STATE_HOST_SELECTOR)).slice(0, REACT_HOST_SCAN_LIMIT)
         : []),
     ].filter(Boolean);
 
     const seen = new WeakSet();
     for (const node of nodes) {
-      const keys = getReflectKeys(node);
+      const keys = getReactPrivateKeys(node);
       for (const key of keys) {
-        if (
-          !key.startsWith("__reactProps$") &&
-          !key.startsWith("__reactFiber$") &&
-          !key.startsWith("__reactContainer$")
-        ) {
-          continue;
-        }
-
         let value;
         try {
           value = node[key];
@@ -1265,6 +1320,7 @@
   function ensureAppSignalModules() {
     if (state.appSignalModules) return state.appSignalModules;
     if (state.appSignalModulesPromise) return null;
+    state.appSignalModulesRequestedAt = Date.now();
 
     const appServerUrl = findLoadedAssetUrl(
       "app-server-manager-signals",
@@ -1331,7 +1387,11 @@
     }
 
     const modules = ensureAppSignalModules();
-    if (!modules || !modules.appServerSignals) return null;
+    if (!modules || !modules.appServerSignals) {
+      state.waitingForAppSignalModules = !!state.appSignalModulesPromise;
+      return null;
+    }
+    state.waitingForAppSignalModules = false;
 
     const scope = findAppSignalScope();
     if (!scope) return null;
@@ -1353,6 +1413,14 @@
     }
 
     return null;
+  }
+
+  function shouldWaitForAppSignalModules(now) {
+    return !!(
+      state.appSignalModulesPromise &&
+      !state.appSignalModules &&
+      now - state.appSignalModulesRequestedAt < APP_SIGNAL_IMPORT_GRACE_MS
+    );
   }
 
   // 流式响应可能是 JSONL，也可能是一整段 JSON；两种都按同一套 reading 规则落库。
@@ -1576,31 +1644,13 @@
   }
 
   function isConversationContent(element) {
-    return !!(
-      element &&
-      element.closest(
-        [
-          `[data-thread-find-target]`,
-          `[data-message-author-role]`,
-          `[data-testid*="conversation" i]`,
-          `[data-testid*="message" i]`,
-          `article`,
-        ].join(","),
-      )
-    );
+    return !!(element && element.closest(CONVERSATION_CONTENT_SELECTOR));
   }
 
   function shouldIgnoreMutationTarget(element) {
     if (!element || element.nodeType !== Node.ELEMENT_NODE) return false;
     if (element.closest(`#${ROOT_ID}`)) return true;
-    return !!element.closest(
-      [
-        `[data-thread-find-target]`,
-        `[data-message-author-role]`,
-        `[data-testid*="message" i]`,
-        `article`,
-      ].join(","),
-    );
+    return !!element.closest(MESSAGE_MUTATION_SELECTOR);
   }
 
   // 兜底读取已渲染的 /status 输出；排除会话正文，避免把用户消息里的 Context 行当成状态。
@@ -1616,14 +1666,13 @@
       const current = node;
       node = walker.nextNode();
 
-      if (current.id === ROOT_ID || current.closest(`#${ROOT_ID}`)) continue;
-      if (isConversationContent(current)) continue;
-      if (!isVisibleElement(current)) continue;
-
       const text = (current.textContent || "").replace(/\s+/g, " ").trim();
       if (text.length < 20 || text.length > 1800) continue;
       if (!/\bStatus\b/i.test(text) || !/\bContext\s*:\s*\d{1,3}(?:\.\d+)?\s*%/i.test(text)) continue;
       if (!/\bSession\s*:|\b5h limit\s*:|\b7d limit\s*:/i.test(text)) continue;
+      if (current.id === ROOT_ID || current.closest(`#${ROOT_ID}`)) continue;
+      if (isConversationContent(current)) continue;
+      if (!isVisibleElement(current)) continue;
 
       chunks.push(text);
     }
@@ -1715,12 +1764,7 @@
       return;
     }
 
-    let keys = [];
-    try {
-      keys = Reflect.ownKeys(value).map(String).slice(0, 100);
-    } catch {
-      return;
-    }
+    const keys = getContextValueKeys(value);
 
     for (const key of keys) {
       let child;
@@ -1730,15 +1774,13 @@
         continue;
       }
 
-      if (contextTerms.test(key)) {
-        if (child == null || typeof child !== "object") {
-          parts.push(`${key}: ${String(child)}`);
-        } else {
-          parts.push(key);
-        }
+      if (child == null || typeof child !== "object") {
+        parts.push(`${key}: ${String(child)}`);
+      } else {
+        parts.push(key);
       }
 
-      if (contextTerms.test(key) || typeof child === "object") {
+      if (typeof child === "object") {
         collectValueText(child, depth - 1, seen, parts);
       }
     }
@@ -1774,33 +1816,13 @@
     const parts = [];
     const seen = new WeakSet();
     const root = document.getElementById("root");
-    const nodes = root
-      ? root.querySelectorAll(
-          [
-            "[data-app-action-sidebar-thread-id]",
-            "[data-testid*='thread' i]",
-            "[data-testid*='conversation' i]",
-            "[data-testid*='message' i]",
-            "[data-message-author-role]",
-            "main",
-            "article",
-          ].join(","),
-        )
-      : [];
+    const nodes = root ? root.querySelectorAll(REACT_STATE_HOST_SELECTOR) : [];
     const limit = Math.min(nodes.length, REACT_HOST_SCAN_LIMIT);
 
     for (let index = 0; index < limit && parts.length < 160; index += 1) {
       const node = nodes[index];
-      const keys = Reflect.ownKeys(node).map(String);
+      const keys = getReactPrivateKeys(node);
       for (const key of keys) {
-        if (
-          !key.startsWith("__reactProps$") &&
-          !key.startsWith("__reactFiber$") &&
-          !key.startsWith("__reactContainer$")
-        ) {
-          continue;
-        }
-
         let value;
         try {
           value = node[key];
@@ -1842,6 +1864,7 @@
 
   // 读取顺序按稳定性排列：app signal > React 状态 > window 缓存 > /status 文本 > storage/DOM 兜底。
   function detectReading() {
+    state.scanGeneration += 1;
     const activeConversationId = updateActiveConversationId();
     const cachedReading = activeConversationId ? state.readingsByConversationId.get(activeConversationId) : null;
     if (cachedReading) return cachedReading;
@@ -1885,6 +1908,11 @@
       state.switchRetryUntil = 0;
       clearRetryUpdate();
       return appSignalReading;
+    }
+
+    if (shouldWaitForAppSignalModules(now)) {
+      scheduleUpdate(APP_SIGNAL_IMPORT_GRACE_MS);
+      return state.lastReading;
     }
 
     const statusReactReading = scanStatusReactContextUsage(activeConversationId);
@@ -1978,6 +2006,13 @@
     }
 
     if (!reading) {
+      if (state.waitingForAppSignalModules) {
+        scheduleUpdate(APP_SIGNAL_IMPORT_GRACE_MS);
+        if (root.dataset.known === "true" && value.textContent !== "Context Left --") return;
+        hideMeter(root, value, fill, "Waiting for Codex context usage signal.");
+        return;
+      }
+
       const title = activeConversationId
         ? `No context usage value is exposed for conversation ${activeConversationId} in the current page state yet.`
         : "No context usage value is exposed in the current page state yet.";
@@ -2068,11 +2103,12 @@
 
     state.observer = new MutationObserver((mutations) => {
       for (const mutation of mutations) {
-        const target = mutation.target && mutation.target.nodeType === Node.ELEMENT_NODE
+      const target = mutation.target && mutation.target.nodeType === Node.ELEMENT_NODE
           ? mutation.target
           : mutation.target && mutation.target.parentElement;
         if (shouldIgnoreMutationTarget(target)) continue;
 
+        invalidateThreadContentCache();
         scheduleUpdate(MUTATION_UPDATE_DELAY_MS);
         return;
       }
@@ -2116,6 +2152,11 @@
       if (captureState && captureState.messageListener) {
         window.removeEventListener("message", captureState.messageListener, true);
         delete captureState.messageListener;
+      }
+      if (captureState) {
+        delete captureState.fetchVersion;
+        delete captureState.webSocketVersion;
+        delete captureState.messageVersion;
       }
 
       delete window[INSTALL_KEY];
