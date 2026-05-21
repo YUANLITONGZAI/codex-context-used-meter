@@ -22,10 +22,10 @@ const DEFAULT_UI_CONFIG = {
   context: {
     compressionWarningLeftPercent: 20,
     levelThresholds: {
-      criticalLeftPercent: 5,
-      dangerLeftPercent: 10,
-      warnLeftPercent: 25,
-      noticeLeftPercent: 50,
+      criticalLeftPercent: 8,
+      dangerLeftPercent: 20,
+      warnLeftPercent: 35,
+      noticeLeftPercent: 60,
     },
   },
 };

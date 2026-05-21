@@ -8,7 +8,7 @@
   const CONFIG_KEY = "__codexContextMeterConfig";
   const PROVIDER_SUMMARY_KEY = "__codexContextMeterProviderSummary";
   const PROVIDER_SUMMARY_EVENT = "codex-context-meter-provider-summary";
-  const SCRIPT_VERSION = 37;
+  const SCRIPT_VERSION = 43;
   const UPDATE_INTERVAL_MS = 5000;
   const SLOW_SCAN_INTERVAL_MS = 30000;
   const SWITCH_RETRY_WINDOW_MS = 8000;
@@ -32,10 +32,10 @@
     context: {
       compressionWarningLeftPercent: 20,
       levelThresholds: {
-        criticalLeftPercent: 5,
-        dangerLeftPercent: 10,
-        warnLeftPercent: 25,
-        noticeLeftPercent: 50,
+        criticalLeftPercent: 8,
+        dangerLeftPercent: 20,
+        warnLeftPercent: 35,
+        noticeLeftPercent: 60,
       },
     },
   };
@@ -268,6 +268,7 @@
       }
 
       #${ROOT_ID} .ccm-track {
+        position: relative;
         width: 100%;
         height: 7px;
         overflow: hidden;
@@ -282,6 +283,29 @@
         border-radius: inherit;
         background: var(--ccm-fill-gradient);
         transition: width 180ms ease, background 180ms ease;
+      }
+
+      #${ROOT_ID} .ccm-compression-zone {
+        position: absolute;
+        inset: 0 auto 0 0;
+        z-index: 1;
+        width: 0%;
+        border-radius: inherit;
+        background:
+          linear-gradient(90deg, rgba(255, 196, 0, 0.2), rgba(255, 126, 34, 0.12)),
+          repeating-linear-gradient(
+            -45deg,
+            rgba(253, 224, 71, 0.72) 0,
+            rgba(253, 224, 71, 0.72) 4px,
+            rgba(251, 146, 60, 0.64) 4px,
+            rgba(251, 146, 60, 0.64) 8px
+          );
+        box-shadow:
+          inset 0 0 0 1px rgba(251, 191, 36, 0.38),
+          inset 0 0 7px rgba(251, 146, 60, 0.18);
+        opacity: 0.82;
+        pointer-events: none;
+        transition: width 180ms ease, opacity 180ms ease;
       }
 
       #${ROOT_ID} .ccm-provider-value {
@@ -313,28 +337,8 @@
         --ccm-fill-gradient: linear-gradient(90deg, #f43f5e, #dc2626);
       }
 
-      #${ROOT_ID} .ccm-context-card[data-compression-warning="true"] .ccm-track {
-        background:
-          repeating-linear-gradient(
-            -45deg,
-            rgba(255, 255, 255, 0.24) 0,
-            rgba(255, 255, 255, 0.24) 5px,
-            rgba(255, 255, 255, 0.08) 5px,
-            rgba(255, 255, 255, 0.08) 10px
-          ),
-          rgba(255, 255, 255, 0.16);
-      }
-
-      #${ROOT_ID} .ccm-context-card[data-compression-warning="true"] .ccm-fill {
-        background-image:
-          repeating-linear-gradient(
-            -45deg,
-            rgba(255, 255, 255, 0.34) 0,
-            rgba(255, 255, 255, 0.34) 5px,
-            rgba(255, 255, 255, 0) 5px,
-            rgba(255, 255, 255, 0) 10px
-          ),
-          var(--ccm-fill-gradient, linear-gradient(90deg, #fb7185, #ef4444));
+      #${ROOT_ID} .ccm-context-card[data-compression-warning="true"] .ccm-compression-zone {
+        opacity: 1;
       }
 
       #${ROOT_ID} .ccm-hit-pop {
@@ -416,6 +420,11 @@
   function ensureRoot() {
     let root = document.getElementById(ROOT_ID);
     if (root) {
+      const contextTrack = root.querySelector(".ccm-context-card .ccm-track");
+      if (contextTrack && !contextTrack.querySelector(".ccm-compression-zone")) {
+        contextTrack.insertBefore(document.createElement("div"), contextTrack.firstChild);
+        contextTrack.firstElementChild.className = "ccm-compression-zone";
+      }
       state.root = root;
       state.contextCard = root.querySelector(".ccm-context-card");
       state.providerCard = root.querySelector(".ccm-provider-card");
@@ -434,6 +443,7 @@
           <span class="ccm-value">Context Left --</span>
         </div>
         <div class="ccm-track">
+          <div class="ccm-compression-zone"></div>
           <div class="ccm-fill"></div>
         </div>
       </div>
@@ -505,7 +515,7 @@
 
   function readUiConfig() {
     const summaryConfig = state.providerSummary && state.providerSummary.ui;
-    return normalizeUiConfig(window[CONFIG_KEY] || summaryConfig || DEFAULT_UI_CONFIG);
+    return normalizeUiConfig(summaryConfig || window[CONFIG_KEY] || DEFAULT_UI_CONFIG);
   }
 
   function levelForLeftPercent(leftPercent) {
@@ -2304,6 +2314,7 @@
     const contextCard = state.contextCard;
     const value = state.value || root.querySelector(".ccm-value");
     const fill = state.fill || root.querySelector(".ccm-fill");
+    const compressionZone = root.querySelector(".ccm-context-card .ccm-compression-zone");
     const reading = detectReading();
     const activeConversationId = state.activeConversationId || readActiveConversationId();
 
@@ -2357,6 +2368,7 @@
     const title = `Source: ${reading.source}${reading.raw ? ` | ${reading.raw}` : ""}`;
     const text = `Context Left ${percentText}%${details}`;
     const width = `${leftPercent.toFixed(1)}%`;
+    const compressionZoneWidth = `${state.uiConfig.context.compressionWarningLeftPercent.toFixed(1)}%`;
 
     if (contextCard.dataset.known !== "true") contextCard.dataset.known = "true";
     if (contextCard.hidden) contextCard.hidden = false;
@@ -2367,6 +2379,9 @@
     if (contextCard.title !== title) contextCard.title = title;
     if (value.textContent !== text) value.textContent = text;
     if (fill.style.width !== width) fill.style.width = width;
+    if (compressionZone && compressionZone.style.width !== compressionZoneWidth) {
+      compressionZone.style.width = compressionZoneWidth;
+    }
     updateDockVisibility(root);
   }
 

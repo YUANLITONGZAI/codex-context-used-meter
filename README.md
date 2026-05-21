@@ -65,7 +65,7 @@ Provider 框显示的名字来自 `provider-config.json` 里的 `displayName`。
 
 Provider 金额默认刷新周期是 10 秒，可以在 `provider-config.json` 里的 `refreshIntervalMs` 调整。
 
-Context 框进入“准备压缩”阶段时，进度条会出现斜线纹理。这个阈值由 `provider-config.json` 里的 `ui.context.compressionWarningLeftPercent` 控制，默认是剩余 20%。颜色分档也可以通过 `ui.context.levelThresholds` 调整。
+Context 条最左边的黄/橙斜线表示“快要压缩了”：当剩余上下文掉进这段区域，就说明这个会话接近压缩点。斜线区域默认占左侧 20%，可以用 `provider-config.json` 里的 `ui.context.compressionWarningLeftPercent` 调整。进度条颜色也会更早提醒：默认剩余 60% 开始变提示色，35% 变预警色，20% 变警告色。
 
 只测试 provider 请求和响应解析，不注入 Codex 页面：
 
@@ -175,7 +175,7 @@ The provider card name comes from `displayName` in `provider-config.json`. Use y
 
 The default provider balance refresh interval is 10 seconds. You can change it with `refreshIntervalMs` in `provider-config.json`.
 
-When the Context card is close to compaction, the progress bar shows a striped warning style. The threshold is configured with `ui.context.compressionWarningLeftPercent` in `provider-config.json`; the default is 20% left. The color levels can also be tuned with `ui.context.levelThresholds`.
+The yellow/orange stripes on the left side of the Context bar mean "getting close to compaction." When the remaining context falls into that striped area, the conversation is near the compaction point. The striped zone defaults to the leftmost 20% and can be changed with `ui.context.compressionWarningLeftPercent` in `provider-config.json`. The bar also changes color earlier: by default it enters notice at 60% left, warn at 35% left, and danger at 20% left.
 
 Test provider fetching and response parsing without injecting the Codex page:
 
