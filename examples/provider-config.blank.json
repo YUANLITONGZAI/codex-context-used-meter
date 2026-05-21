@@ -1,0 +1,38 @@
+{
+  "codex": {
+    "debugPort": 9229,
+    "targetUrlHint": "codex"
+  },
+  "ui": {
+    "context": {
+      "compressionWarningLeftPercent": 20,
+      "levelThresholds": {
+        "criticalLeftPercent": 5,
+        "dangerLeftPercent": 10,
+        "warnLeftPercent": 25,
+        "noticeLeftPercent": 50
+      }
+    }
+  },
+  "providers": [
+    {
+      "id": "",
+      "displayName": "",
+      "type": "newapi-subscription",
+      "baseUrl": "",
+      "endpointPath": "",
+      "auth": {
+        "type": "bearer",
+        "accessTokenSecret": "provider_access_token"
+      },
+      "userHeader": {
+        "name": "",
+        "valueSecret": "provider_user_id"
+      },
+      "refreshIntervalMs": 10000,
+      "quota": {
+        "amountDivisor": 500000
+      }
+    }
+  ]
+}

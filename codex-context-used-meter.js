@@ -5,7 +5,10 @@
   const STYLE_ID = "codex-context-meter-style";
   const ROOT_ID = "codex-context-meter";
   const CAPTURE_STATE_KEY = "__codexContextMeterCaptureState";
-  const SCRIPT_VERSION = 33;
+  const CONFIG_KEY = "__codexContextMeterConfig";
+  const PROVIDER_SUMMARY_KEY = "__codexContextMeterProviderSummary";
+  const PROVIDER_SUMMARY_EVENT = "codex-context-meter-provider-summary";
+  const SCRIPT_VERSION = 37;
   const UPDATE_INTERVAL_MS = 5000;
   const SLOW_SCAN_INTERVAL_MS = 30000;
   const SWITCH_RETRY_WINDOW_MS = 8000;
@@ -25,6 +28,17 @@
   const WINDOW_KEY_CACHE_MS = 10000;
   const MAX_TEXT_LENGTH = 120000;
   const MAX_CAPTURE_TEXT_LENGTH = 2000000;
+  const DEFAULT_UI_CONFIG = {
+    context: {
+      compressionWarningLeftPercent: 20,
+      levelThresholds: {
+        criticalLeftPercent: 5,
+        dangerLeftPercent: 10,
+        warnLeftPercent: 25,
+        noticeLeftPercent: 50,
+      },
+    },
+  };
   const CAPTURE_TEXT_HINT_RE = /context|token|usage|latestTokenUsageInfo|window|budget|remaining|上下文|令牌|使用|窗口/i;
   const THREAD_CONTENT_SELECTOR = [
     '[data-app-shell-main-content-layout*="thread"]',
@@ -124,9 +138,17 @@
     lastReading: null,
     readingsByConversationId: new Map(),
     lastAnimatedUsedByConversationId: new Map(),
+    lastAnimatedProviderUsedById: new Map(),
     root: null,
+    contextCard: null,
+    providerCard: null,
     value: null,
     fill: null,
+    providerValue: null,
+    providerFill: null,
+    providerSummary: null,
+    uiConfig: DEFAULT_UI_CONFIG,
+    providerSummaryListener: null,
     lastScanAt: 0,
     lastScannedConversationId: null,
     navigationPendingUntil: 0,
@@ -178,19 +200,41 @@
   }
 
   function installStyle() {
-    if (document.getElementById(STYLE_ID)) return;
+    const existingStyle = document.getElementById(STYLE_ID);
+    if (existingStyle && existingStyle.dataset.version === String(SCRIPT_VERSION)) return;
+    existingStyle?.remove();
 
     const style = document.createElement("style");
     style.id = STYLE_ID;
+    style.dataset.version = String(SCRIPT_VERSION);
     style.textContent = `
       #${ROOT_ID} {
+        --ccm-card-width: min(240px, calc((100vw - 40px) / 2));
         position: fixed;
         top: max(10px, env(safe-area-inset-top));
         left: 50%;
         transform: translateX(-50%);
         z-index: 2147483647;
-        min-width: 220px;
-        max-width: min(420px, calc(100vw - 32px));
+        display: flex;
+        align-items: flex-start;
+        justify-content: center;
+        gap: 8px;
+        max-width: calc(100vw - 32px);
+        overflow: visible;
+        pointer-events: none;
+        user-select: none;
+      }
+
+      #${ROOT_ID}[hidden] {
+        display: none !important;
+      }
+
+      #${ROOT_ID} .ccm-card {
+        box-sizing: border-box;
+        flex: 0 0 var(--ccm-card-width);
+        width: var(--ccm-card-width);
+        min-width: 0;
+        max-width: var(--ccm-card-width);
         padding: 8px 10px 9px;
         border: 1px solid rgba(255, 255, 255, 0.16);
         border-radius: 8px;
@@ -199,9 +243,11 @@
         box-shadow: 0 8px 28px rgba(0, 0, 0, 0.24);
         font: 12px/1.35 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
         overflow: visible;
-        pointer-events: none;
-        user-select: none;
         backdrop-filter: blur(10px);
+      }
+
+      #${ROOT_ID} .ccm-card[hidden] {
+        display: none !important;
       }
 
       #${ROOT_ID} .ccm-row {
@@ -230,23 +276,65 @@
       }
 
       #${ROOT_ID} .ccm-fill {
+        --ccm-fill-gradient: linear-gradient(90deg, #4ea1ff, #4ade80);
         width: 0%;
         height: 100%;
         border-radius: inherit;
-        background: linear-gradient(90deg, #4ea1ff, #4ade80);
+        background: var(--ccm-fill-gradient);
         transition: width 180ms ease, background 180ms ease;
       }
 
-      #${ROOT_ID}[data-level="warn"] .ccm-fill {
-        background: linear-gradient(90deg, #f59e0b, #f97316);
+      #${ROOT_ID} .ccm-provider-value {
+        color: rgba(255, 255, 255, 0.98);
+        font-weight: 650;
+        font-variant-numeric: tabular-nums;
+        overflow: hidden;
+        text-align: center;
+        text-overflow: ellipsis;
       }
 
-      #${ROOT_ID}[data-level="danger"] .ccm-fill {
-        background: linear-gradient(90deg, #fb7185, #ef4444);
+      #${ROOT_ID} .ccm-context-card[data-level="warn"] .ccm-fill,
+      #${ROOT_ID} .ccm-provider-card[data-level="warn"] .ccm-fill {
+        --ccm-fill-gradient: linear-gradient(90deg, #f59e0b, #f97316);
       }
 
-      #${ROOT_ID}[hidden] {
-        display: none !important;
+      #${ROOT_ID} .ccm-context-card[data-level="danger"] .ccm-fill,
+      #${ROOT_ID} .ccm-provider-card[data-level="danger"] .ccm-fill {
+        --ccm-fill-gradient: linear-gradient(90deg, #fb7185, #ef4444);
+      }
+
+      #${ROOT_ID} .ccm-context-card[data-level="notice"] .ccm-fill,
+      #${ROOT_ID} .ccm-provider-card[data-level="notice"] .ccm-fill {
+        --ccm-fill-gradient: linear-gradient(90deg, #22d3ee, #38bdf8);
+      }
+
+      #${ROOT_ID} .ccm-context-card[data-level="critical"] .ccm-fill,
+      #${ROOT_ID} .ccm-provider-card[data-level="critical"] .ccm-fill {
+        --ccm-fill-gradient: linear-gradient(90deg, #f43f5e, #dc2626);
+      }
+
+      #${ROOT_ID} .ccm-context-card[data-compression-warning="true"] .ccm-track {
+        background:
+          repeating-linear-gradient(
+            -45deg,
+            rgba(255, 255, 255, 0.24) 0,
+            rgba(255, 255, 255, 0.24) 5px,
+            rgba(255, 255, 255, 0.08) 5px,
+            rgba(255, 255, 255, 0.08) 10px
+          ),
+          rgba(255, 255, 255, 0.16);
+      }
+
+      #${ROOT_ID} .ccm-context-card[data-compression-warning="true"] .ccm-fill {
+        background-image:
+          repeating-linear-gradient(
+            -45deg,
+            rgba(255, 255, 255, 0.34) 0,
+            rgba(255, 255, 255, 0.34) 5px,
+            rgba(255, 255, 255, 0) 5px,
+            rgba(255, 255, 255, 0) 10px
+          ),
+          var(--ccm-fill-gradient, linear-gradient(90deg, #fb7185, #ef4444));
       }
 
       #${ROOT_ID} .ccm-hit-pop {
@@ -276,6 +364,14 @@
         will-change: opacity, transform, filter;
       }
 
+      #${ROOT_ID} .ccm-provider-hit-pop {
+        left: calc(100% + 10px);
+        right: auto;
+        transform: translate(-44px, -50%) scale(0.72);
+        transform-origin: left center;
+        animation-name: ccm-provider-hit-pop;
+      }
+
       @keyframes ccm-hit-pop {
         0% {
           opacity: 0;
@@ -294,6 +390,25 @@
           transform: translate(-176px, -50%) scale(2.08);
         }
       }
+
+      @keyframes ccm-provider-hit-pop {
+        0% {
+          opacity: 0;
+          transform: translate(-44px, -50%) scale(0.72);
+        }
+        12% {
+          opacity: 1;
+          transform: translate(-8px, -50%) scale(1);
+        }
+        72% {
+          opacity: 1;
+          transform: translate(128px, -50%) scale(1.82);
+        }
+        100% {
+          opacity: 0;
+          transform: translate(176px, -50%) scale(2.08);
+        }
+      }
     `;
     document.head.appendChild(style);
   }
@@ -302,27 +417,43 @@
     let root = document.getElementById(ROOT_ID);
     if (root) {
       state.root = root;
+      state.contextCard = root.querySelector(".ccm-context-card");
+      state.providerCard = root.querySelector(".ccm-provider-card");
       state.value = root.querySelector(".ccm-value");
       state.fill = root.querySelector(".ccm-fill");
+      state.providerValue = root.querySelector(".ccm-provider-value");
+      state.providerFill = root.querySelector(".ccm-provider-fill");
       return root;
     }
 
     root = document.createElement("div");
     root.id = ROOT_ID;
-    root.dataset.known = "false";
-    root.dataset.level = "normal";
     root.innerHTML = `
-      <div class="ccm-row">
-        <span class="ccm-value">Context Left --</span>
+      <div class="ccm-card ccm-context-card" data-known="false" data-level="normal" hidden>
+        <div class="ccm-row">
+          <span class="ccm-value">Context Left --</span>
+        </div>
+        <div class="ccm-track">
+          <div class="ccm-fill"></div>
+        </div>
       </div>
-      <div class="ccm-track">
-        <div class="ccm-fill"></div>
+      <div class="ccm-card ccm-provider-card" data-known="false" data-level="normal" hidden>
+        <div class="ccm-row">
+          <span class="ccm-provider-value">Provider Left --</span>
+        </div>
+        <div class="ccm-track">
+          <div class="ccm-fill ccm-provider-fill"></div>
+        </div>
       </div>
     `;
     document.body.appendChild(root);
     state.root = root;
+    state.contextCard = root.querySelector(".ccm-context-card");
+    state.providerCard = root.querySelector(".ccm-provider-card");
     state.value = root.querySelector(".ccm-value");
     state.fill = root.querySelector(".ccm-fill");
+    state.providerValue = root.querySelector(".ccm-provider-value");
+    state.providerFill = root.querySelector(".ccm-provider-fill");
     return root;
   }
 
@@ -343,6 +474,54 @@
     return Math.max(0, Math.min(100, value));
   }
 
+  function numberOrDefault(value, fallback) {
+    const number = Number(value);
+    return Number.isFinite(number) ? number : fallback;
+  }
+
+  function normalizeUiConfig(value) {
+    const input = value && typeof value === "object" ? value : {};
+    const context = input.context && typeof input.context === "object" ? input.context : {};
+    const levelThresholds = context.levelThresholds && typeof context.levelThresholds === "object"
+      ? context.levelThresholds
+      : {};
+    const defaults = DEFAULT_UI_CONFIG.context.levelThresholds;
+
+    return {
+      context: {
+        compressionWarningLeftPercent: clampPercent(numberOrDefault(
+          context.compressionWarningLeftPercent,
+          DEFAULT_UI_CONFIG.context.compressionWarningLeftPercent,
+        )),
+        levelThresholds: {
+          criticalLeftPercent: clampPercent(numberOrDefault(levelThresholds.criticalLeftPercent, defaults.criticalLeftPercent)),
+          dangerLeftPercent: clampPercent(numberOrDefault(levelThresholds.dangerLeftPercent, defaults.dangerLeftPercent)),
+          warnLeftPercent: clampPercent(numberOrDefault(levelThresholds.warnLeftPercent, defaults.warnLeftPercent)),
+          noticeLeftPercent: clampPercent(numberOrDefault(levelThresholds.noticeLeftPercent, defaults.noticeLeftPercent)),
+        },
+      },
+    };
+  }
+
+  function readUiConfig() {
+    const summaryConfig = state.providerSummary && state.providerSummary.ui;
+    return normalizeUiConfig(window[CONFIG_KEY] || summaryConfig || DEFAULT_UI_CONFIG);
+  }
+
+  function levelForLeftPercent(leftPercent) {
+    const thresholds = state.uiConfig.context.levelThresholds;
+    if (leftPercent <= thresholds.criticalLeftPercent) return "critical";
+    if (leftPercent <= thresholds.dangerLeftPercent) return "danger";
+    if (leftPercent <= thresholds.warnLeftPercent) return "warn";
+    if (leftPercent <= thresholds.noticeLeftPercent) return "notice";
+    return "normal";
+  }
+
+  function shouldShowCompressionWarning(leftPercent) {
+    const threshold = state.uiConfig.context.compressionWarningLeftPercent;
+    return Number.isFinite(threshold) && leftPercent <= threshold;
+  }
+
   function compactNumber(value) {
     if (!Number.isFinite(value)) return "";
     if (value >= 1000000) return `${(value / 1000000).toFixed(1)}M`;
@@ -350,13 +529,37 @@
     return String(Math.round(value));
   }
 
-  function showTokenSpendEffect(root, deltaTokens) {
-    if (!root || !Number.isFinite(deltaTokens) || deltaTokens <= 0) return;
+  function formatAmount(value) {
+    if (!Number.isFinite(value)) return "--";
+    if (Math.abs(value) >= 1000) return value.toLocaleString("en-US", { maximumFractionDigits: 1 });
+    return value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }
+
+  function formatMoney(value) {
+    const amount = formatAmount(value);
+    return amount === "--" ? amount : `$${amount}`;
+  }
+
+  function showTokenSpendEffect(card, deltaTokens) {
+    if (!card || !Number.isFinite(deltaTokens) || deltaTokens <= 0) return;
 
     const pop = document.createElement("div");
     pop.className = "ccm-hit-pop";
     pop.textContent = `-${Math.round(deltaTokens).toLocaleString("en-US")} Tokens`;
-    root.appendChild(pop);
+    card.appendChild(pop);
+
+    window.setTimeout(() => {
+      pop.remove();
+    }, 3100);
+  }
+
+  function showProviderSpendEffect(card, deltaAmount) {
+    if (!card || !Number.isFinite(deltaAmount) || deltaAmount <= 0) return;
+
+    const pop = document.createElement("div");
+    pop.className = "ccm-hit-pop ccm-provider-hit-pop";
+    pop.textContent = `-${formatMoney(deltaAmount)}`;
+    card.appendChild(pop);
 
     window.setTimeout(() => {
       pop.remove();
@@ -396,14 +599,119 @@
     return url.protocol === "app:" && url.pathname.endsWith("/index.html");
   }
 
-  function hideMeter(root, value, fill, title) {
-    if (root.dataset.known !== "false") root.dataset.known = "false";
-    if (root.dataset.level !== "normal") root.dataset.level = "normal";
-    if (root.title !== title) root.title = title;
+  function updateDockVisibility(root) {
+    const contextVisible = state.contextCard && !state.contextCard.hidden;
+    const providerVisible = state.providerCard && !state.providerCard.hidden;
+    root.hidden = !contextVisible && !providerVisible;
+  }
+
+  function hideMeter(root, card, value, fill, title) {
+    if (!card) return;
+    if (card.dataset.known !== "false") card.dataset.known = "false";
+    if (card.dataset.level !== "normal") card.dataset.level = "normal";
+    if (card.dataset.compressionWarning !== "false") card.dataset.compressionWarning = "false";
+    if (card.title !== title) card.title = title;
     if (value.textContent !== "Context Left --") value.textContent = "Context Left --";
     if (fill.style.width !== "0%") fill.style.width = "0%";
-    root.hidden = true;
-    root.querySelectorAll(".ccm-hit-pop").forEach((node) => node.remove());
+    card.hidden = true;
+    card.querySelectorAll(".ccm-hit-pop").forEach((node) => node.remove());
+    updateDockVisibility(root);
+  }
+
+  function hideProviderMeter(root, reason) {
+    const card = state.providerCard;
+    if (!card) return;
+    if (card.dataset.known !== "false") card.dataset.known = "false";
+    if (card.dataset.level !== "normal") card.dataset.level = "normal";
+    if (card.title !== reason) card.title = reason;
+    if (state.providerFill && state.providerFill.style.width !== "0%") state.providerFill.style.width = "0%";
+    card.hidden = true;
+    card.querySelectorAll(".ccm-hit-pop").forEach((node) => node.remove());
+    updateDockVisibility(root);
+  }
+
+  function pickProviderSummary(summary) {
+    const providers = summary && Array.isArray(summary.providers) ? summary.providers : [];
+    return providers.find((provider) => provider && provider.status === "active") || null;
+  }
+
+  function renderProviderMeter(root) {
+    state.providerSummary = readProviderSummary();
+    state.uiConfig = readUiConfig();
+    const provider = pickProviderSummary(state.providerSummary);
+    if (!provider) {
+      hideProviderMeter(root, "No active provider summary is available.");
+      return;
+    }
+
+    const card = state.providerCard;
+    if (!card || !state.providerValue || !state.providerFill) return;
+
+    const usedPercent = clampPercent(Number(provider.usedPercent));
+    const remainingAmount = Number(provider.remainingAmount);
+    const totalAmount = Number(provider.totalAmount);
+    const usedAmount = Number.isFinite(Number(provider.usedAmount))
+      ? Number(provider.usedAmount)
+      : totalAmount - remainingAmount;
+    if (usedPercent == null || !Number.isFinite(remainingAmount) || !Number.isFinite(totalAmount) || !Number.isFinite(usedAmount)) {
+      hideProviderMeter(root, "Provider summary is missing quota values.");
+      return;
+    }
+
+    const leftPercent = clampPercent(100 - usedPercent);
+    const level = levelForLeftPercent(leftPercent);
+    const name = String(provider.displayName || provider.id || "Provider").slice(0, 48);
+    const text = `${name} Left ${leftPercent.toFixed(1)}% ${formatMoney(usedAmount)} / ${formatMoney(totalAmount)}`;
+    const width = `${leftPercent.toFixed(1)}%`;
+    const title = `Provider: ${name} | Status: ${provider.status}`;
+    const providerId = String(provider.id || name || "__provider__");
+    const currentUsed = Number(provider.used);
+
+    if (Number.isFinite(currentUsed)) {
+      const previousUsed = state.lastAnimatedProviderUsedById.get(providerId);
+      if (Number.isFinite(previousUsed) && currentUsed > previousUsed && Number.isFinite(provider.total) && provider.total > 0) {
+        showProviderSpendEffect(card, (currentUsed - previousUsed) * (totalAmount / Number(provider.total)));
+      }
+      state.lastAnimatedProviderUsedById.set(providerId, currentUsed);
+    }
+
+    if (card.dataset.known !== "true") card.dataset.known = "true";
+    if (card.dataset.level !== level) card.dataset.level = level;
+    if (card.title !== title) card.title = title;
+    if (state.providerValue.textContent !== text) state.providerValue.textContent = text;
+    if (state.providerFill.style.width !== width) state.providerFill.style.width = width;
+    if (card.hidden) card.hidden = false;
+    updateDockVisibility(root);
+  }
+
+  function readProviderSummary() {
+    const summary = window[PROVIDER_SUMMARY_KEY];
+    return summary && typeof summary === "object" ? summary : null;
+  }
+
+  // helper 通过 CDP 写入脱敏 summary；真实 token、用户 ID 和服务商地址不进入渲染页。
+  function setProviderSummary(summary) {
+    state.providerSummary = summary && typeof summary === "object" ? summary : null;
+    if (state.providerSummary) {
+      window[PROVIDER_SUMMARY_KEY] = state.providerSummary;
+      if (state.providerSummary.ui && typeof state.providerSummary.ui === "object") {
+        window[CONFIG_KEY] = normalizeUiConfig(state.providerSummary.ui);
+      }
+    }
+    const root = state.root || document.getElementById(ROOT_ID);
+    if (root) renderProviderMeter(root);
+  }
+
+  function installProviderSummaryListener() {
+    if (state.providerSummaryListener) return;
+    state.providerSummary = readProviderSummary();
+    state.providerSummaryListener = (event) => {
+      setProviderSummary(event && event.detail);
+    };
+    try {
+      window.addEventListener(PROVIDER_SUMMARY_EVENT, state.providerSummaryListener);
+    } catch {
+    }
   }
 
   function makeReading(percent, source, raw, used, limit) {
@@ -1992,31 +2300,35 @@
     if (!document.body) return;
 
     const root = ensureRoot();
+    state.uiConfig = readUiConfig();
+    const contextCard = state.contextCard;
     const value = state.value || root.querySelector(".ccm-value");
     const fill = state.fill || root.querySelector(".ccm-fill");
     const reading = detectReading();
     const activeConversationId = state.activeConversationId || readActiveConversationId();
 
-    if (!value || !fill) return;
+    if (!contextCard || !value || !fill) return;
 
     if (!hasThreadContentSurface()) {
       state.lastReading = null;
-      hideMeter(root, value, fill, "No thread content is open in the main view.");
+      hideProviderMeter(root, "No thread content is open in the main view.");
+      hideMeter(root, contextCard, value, fill, "No thread content is open in the main view.");
       return;
     }
+    renderProviderMeter(root);
 
     if (!reading) {
       if (state.waitingForAppSignalModules) {
         scheduleUpdate(APP_SIGNAL_IMPORT_GRACE_MS);
-        if (root.dataset.known === "true" && value.textContent !== "Context Left --") return;
-        hideMeter(root, value, fill, "Waiting for Codex context usage signal.");
+        if (contextCard.dataset.known === "true" && value.textContent !== "Context Left --") return;
+        hideMeter(root, contextCard, value, fill, "Waiting for Codex context usage signal.");
         return;
       }
 
       const title = activeConversationId
         ? `No context usage value is exposed for conversation ${activeConversationId} in the current page state yet.`
         : "No context usage value is exposed in the current page state yet.";
-      hideMeter(root, value, fill, title);
+      hideMeter(root, contextCard, value, fill, title);
       return;
     }
 
@@ -2035,22 +2347,27 @@
     if (readingConversationId && Number.isFinite(reading.used)) {
       const previousUsed = state.lastAnimatedUsedByConversationId.get(readingConversationId);
       if (Number.isFinite(previousUsed) && reading.used > previousUsed) {
-        showTokenSpendEffect(root, reading.used - previousUsed);
+        showTokenSpendEffect(contextCard, reading.used - previousUsed);
       }
       state.lastAnimatedUsedByConversationId.set(readingConversationId, reading.used);
     }
 
-    const level = leftPercent <= 10 ? "danger" : leftPercent <= 25 ? "warn" : "normal";
+    const level = levelForLeftPercent(leftPercent);
+    const compressionWarning = shouldShowCompressionWarning(leftPercent) ? "true" : "false";
     const title = `Source: ${reading.source}${reading.raw ? ` | ${reading.raw}` : ""}`;
     const text = `Context Left ${percentText}%${details}`;
     const width = `${leftPercent.toFixed(1)}%`;
 
-    if (root.dataset.known !== "true") root.dataset.known = "true";
-    if (root.hidden) root.hidden = false;
-    if (root.dataset.level !== level) root.dataset.level = level;
-    if (root.title !== title) root.title = title;
+    if (contextCard.dataset.known !== "true") contextCard.dataset.known = "true";
+    if (contextCard.hidden) contextCard.hidden = false;
+    if (contextCard.dataset.level !== level) contextCard.dataset.level = level;
+    if (contextCard.dataset.compressionWarning !== compressionWarning) {
+      contextCard.dataset.compressionWarning = compressionWarning;
+    }
+    if (contextCard.title !== title) contextCard.title = title;
     if (value.textContent !== text) value.textContent = text;
     if (fill.style.width !== width) fill.style.width = width;
+    updateDockVisibility(root);
   }
 
   function scheduleUpdate(delayMs = MUTATION_UPDATE_DELAY_MS) {
@@ -2130,6 +2447,7 @@
   window[API_KEY] = {
     version: SCRIPT_VERSION,
     refresh: updateMeter,
+    setProviderSummary,
     destroy() {
       window.clearInterval(state.timer);
       window.clearTimeout(state.pendingUpdate);
@@ -2140,6 +2458,10 @@
         document.removeEventListener("pointerdown", state.navigationListener, true);
         document.removeEventListener("click", state.navigationListener, true);
         document.removeEventListener("keydown", state.navigationListener, true);
+      }
+      if (state.providerSummaryListener) {
+        window.removeEventListener(PROVIDER_SUMMARY_EVENT, state.providerSummaryListener);
+        state.providerSummaryListener = null;
       }
 
       const root = document.getElementById(ROOT_ID);
@@ -2170,6 +2492,7 @@
         animatedConversationIds: Array.from(state.lastAnimatedUsedByConversationId.keys()),
         hasAppSignalScope: isAppSignalScope(state.appSignalScope),
         hasAppSignalModules: !!state.appSignalModules,
+        providerSummary: state.providerSummary,
       };
     },
   };
@@ -2178,6 +2501,7 @@
   installFetchCapture();
   installWebSocketCapture();
   installPostMessageCapture();
+  installProviderSummaryListener();
   updateMeter();
   installObserver();
   state.timer = window.setInterval(updateMeter, UPDATE_INTERVAL_MS);

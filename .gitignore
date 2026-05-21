@@ -1,0 +1,8 @@
+local/
+*.local.json
+.env
+.env.local
+.env.*.local
+secrets.json
+provider-config.json
+provider-secrets.json

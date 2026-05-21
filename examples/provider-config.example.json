@@ -1,0 +1,38 @@
+{
+  "codex": {
+    "debugPort": 9229,
+    "targetUrlHint": "codex"
+  },
+  "ui": {
+    "context": {
+      "compressionWarningLeftPercent": 20,
+      "levelThresholds": {
+        "criticalLeftPercent": 5,
+        "dangerLeftPercent": 10,
+        "warnLeftPercent": 25,
+        "noticeLeftPercent": 50
+      }
+    }
+  },
+  "providers": [
+    {
+      "id": "primary",
+      "displayName": "Example Provider",
+      "type": "newapi-subscription",
+      "baseUrl": "https://example.com",
+      "endpointPath": "/api/subscription/self",
+      "auth": {
+        "type": "bearer",
+        "accessTokenSecret": "primary_access_token"
+      },
+      "userHeader": {
+        "name": "New-Api-User",
+        "valueSecret": "primary_user_id"
+      },
+      "refreshIntervalMs": 10000,
+      "quota": {
+        "amountDivisor": 500000
+      }
+    }
+  ]
+}
