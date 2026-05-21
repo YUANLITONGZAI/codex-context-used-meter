@@ -272,6 +272,7 @@
     }, 3100);
   }
 
+  // 只把主会话内容区当作可显示区域；Codex App DOM 更新后，优先从这里重找 thread/transcript 锚点。
   function hasThreadContentSurface() {
     if (!isConversationWindow()) return false;
 
@@ -287,6 +288,7 @@
     );
   }
 
+  // Pet/头像层也运行在 app://-/index.html，需要额外按 route 排除非对话窗口。
   function isConversationWindow() {
     const url = new URL(location.href);
     const route = `${url.pathname} ${url.search} ${url.hash}`.toLowerCase();
@@ -392,6 +394,7 @@
       return state.cachedActiveConversationId;
     }
 
+    // 当前会话 ID 主要挂在左侧会话列表的 current/selected/active 状态节点上。
     const selectors = [
       `[aria-current="page"][data-app-action-sidebar-thread-id]`,
       `[data-app-action-sidebar-thread-active="true"][data-app-action-sidebar-thread-id]`,
@@ -514,6 +517,7 @@
     return null;
   }
 
+  // /status 输出格式的文本锚点；如果上游改了 Context 行文案，优先同步这里。
   function parseStatusContextText(text, source) {
     if (!text || !/\bContext\s*:/i.test(text)) return null;
 
@@ -1010,6 +1014,7 @@
     return null;
   }
 
+  // React 私有字段是从界面节点回溯运行态状态的桥；升级后若读不到值，优先检查 __react* 键。
   function scanStatusReactContextUsage(activeConversationId) {
     const nodes = [
       document.getElementById("root"),
@@ -1190,6 +1195,7 @@
     return new URL(fallbackPath, location.href).href;
   }
 
+  // 优先读取 Status 使用的 app signal；bundle hash 或导出名变化时，先更新这两个资产入口。
   function ensureAppSignalModules() {
     if (state.appSignalModules) return state.appSignalModules;
     if (state.appSignalModulesPromise) return null;
@@ -1268,6 +1274,7 @@
       normalizeConversationId(scope.value && scope.value.conversationId);
     if (!conversationId) return null;
 
+    // 当前版本里 appServerSignals.B 对应 latestTokenUsageInfo；上游重排导出时需要重新定位。
     const latestTokenUsageSelector = modules.appServerSignals.B;
     const tokenUsage = readSignalValue(scope, latestTokenUsageSelector, conversationId);
     const reading = parseStatusContextUsageObject(tokenUsage, "app-signal", conversationId);
@@ -1506,6 +1513,7 @@
     );
   }
 
+  // 兜底读取已渲染的 /status 输出；排除会话正文，避免把用户消息里的 Context 行当成状态。
   function collectStatusCommandText() {
     const chunks = [];
     const nodes = document.querySelectorAll("body *");
@@ -1711,6 +1719,7 @@
     return null;
   }
 
+  // 读取顺序按稳定性排列：app signal > React 状态 > window 缓存 > /status 文本 > storage/DOM 兜底。
   function detectReading() {
     const activeConversationId = updateActiveConversationId();
     const cachedReading = activeConversationId ? state.readingsByConversationId.get(activeConversationId) : null;
@@ -1880,6 +1889,7 @@
     }, delay);
   }
 
+  // 提前捕获侧栏会话切换，避免 DOM/状态更新滞后时短暂沿用旧会话读数。
   function handlePotentialNavigation(event) {
     const target = event.target && event.target.closest
       ? event.target.closest("[data-app-action-sidebar-thread-id]")
@@ -1927,6 +1937,7 @@
     state.observer.observe(document.documentElement, {
       attributes: true,
       attributeFilter: [
+        // 会话切换只依赖侧栏 active/current/id 相关属性；Codex 改名时同步这组属性。
         "aria-current",
         "aria-selected",
         "data-app-action-sidebar-thread-active",
