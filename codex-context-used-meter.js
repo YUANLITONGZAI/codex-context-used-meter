@@ -4,7 +4,7 @@
   const STYLE_ID = "codex-context-meter-style";
   const ROOT_ID = "codex-context-meter";
   const CAPTURE_STATE_KEY = "__codexContextMeterCaptureState";
-  const SCRIPT_VERSION = 26;
+  const SCRIPT_VERSION = 28;
   const UPDATE_INTERVAL_MS = 5000;
   const SLOW_SCAN_INTERVAL_MS = 30000;
   const SWITCH_RETRY_WINDOW_MS = 8000;
@@ -272,6 +272,29 @@
     }, 3100);
   }
 
+  function hasThreadContentSurface() {
+    const main = document.querySelector("main");
+    if (!main) return false;
+
+    return !!(
+      main.querySelector('[data-app-shell-main-content-layout*="thread"]') ||
+      main.querySelector('[class*="thread-edge"]') ||
+      main.querySelector('[class*="transcript"]') ||
+      main.querySelector('[data-testid*="thread"], [data-test-id*="thread"]') ||
+      main.querySelector('[data-testid*="conversation"], [data-test-id*="conversation"]')
+    );
+  }
+
+  function hideMeter(root, value, fill, title) {
+    if (root.dataset.known !== "false") root.dataset.known = "false";
+    if (root.dataset.level !== "normal") root.dataset.level = "normal";
+    if (root.title !== title) root.title = title;
+    if (value.textContent !== "Context Left --") value.textContent = "Context Left --";
+    if (fill.style.width !== "0%") fill.style.width = "0%";
+    root.hidden = true;
+    root.querySelectorAll(".ccm-hit-pop").forEach((node) => node.remove());
+  }
+
   function makeReading(percent, source, raw, used, limit) {
     const safePercent = clampPercent(percent);
     if (safePercent == null) return null;
@@ -445,6 +468,7 @@
       activateConversationId(activeConversationId);
     } else {
       state.activeConversationId = null;
+      state.lastReading = null;
       state.cachedActiveConversationId = null;
       state.activeConversationIdLookupAt = Date.now();
       state.navigationPendingUntil = 0;
@@ -1682,9 +1706,7 @@
     const cachedReading = activeConversationId ? state.readingsByConversationId.get(activeConversationId) : null;
     if (cachedReading) return cachedReading;
 
-    if (!activeConversationId && state.lastReading) {
-      return state.lastReading;
-    }
+    if (!activeConversationId) return null;
 
     if (state.lastReading && state.lastReading.conversationId && conversationIdsMatch(activeConversationId, state.lastReading.conversationId)) {
       return state.lastReading;
@@ -1764,7 +1786,6 @@
     }
 
     if (
-      !activeConversationId ||
       !state.lastReading ||
       !state.lastReading.conversationId ||
       conversationIdsMatch(activeConversationId, state.lastReading.conversationId)
@@ -1788,17 +1809,17 @@
 
     if (!value || !fill) return;
 
+    if (!hasThreadContentSurface()) {
+      state.lastReading = null;
+      hideMeter(root, value, fill, "No thread content is open in the main view.");
+      return;
+    }
+
     if (!reading) {
       const title = activeConversationId
         ? `No context usage value is exposed for conversation ${activeConversationId} in the current page state yet.`
         : "No context usage value is exposed in the current page state yet.";
-      if (root.dataset.known !== "false") root.dataset.known = "false";
-      if (root.dataset.level !== "normal") root.dataset.level = "normal";
-      if (root.title !== title) root.title = title;
-      if (value.textContent !== "Context Left --") value.textContent = "Context Left --";
-      if (fill.style.width !== "0%") fill.style.width = "0%";
-      root.hidden = true;
-      root.querySelectorAll(".ccm-hit-pop").forEach((node) => node.remove());
+      hideMeter(root, value, fill, title);
       return;
     }
 
