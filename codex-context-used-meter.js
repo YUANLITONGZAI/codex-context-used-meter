@@ -1,4 +1,5 @@
 (() => {
+  // Codex++ 会把本文件注入 Codex 渲染页；所有读取都只能依赖页面里已经暴露的运行态信号。
   const INSTALL_KEY = "__codexContextMeterInstalled";
   const API_KEY = "__codexContextMeter";
   const STYLE_ID = "codex-context-meter-style";
@@ -372,6 +373,7 @@
     return reading;
   }
 
+  // Codex 部分会话 ID 只存在于 React 写到 DOM 节点上的私有 props，普通 attribute 读不到。
   function getReactPropValue(node, propName) {
     if (!node) return null;
 
@@ -490,6 +492,7 @@
     return false;
   }
 
+  // 只刷新会话指针，不触发“切换会话”副作用；用于侧栏隐藏或短暂缺失 active 节点的场景。
   function retainConversationId(conversationId) {
     const normalizedConversationId = normalizeConversationId(conversationId);
     if (!normalizedConversationId) return false;
@@ -710,6 +713,7 @@
     return fields.find((field) => field.relevant && pattern.test(field.key));
   }
 
+  // 面向未知 payload 的最后一层结构化解析：只根据字段路径语义配对数值，避免绑定单一接口形状。
   function parseStructuredValue(value, source) {
     const fields = [];
     collectNumericFields(value, "", 8, new WeakSet(), fields);
@@ -837,6 +841,7 @@
     ), conversationId);
   }
 
+  // fetch / websocket / postMessage 捕获到的对象形状不一致，这里统一收敛到 reading 并过滤非当前会话。
   function inspectCandidateValue(value, source, ownerConversationId) {
     if (!value || typeof value !== "object") return null;
 
@@ -890,6 +895,7 @@
     return null;
   }
 
+  // 反向遍历 React / window 状态树时，Map key 或父对象常常比叶子值更像会话归属来源。
   function findStatusContextUsageObject(value, depth, seen, activeConversationId, ownerConversationId) {
     if (!value || typeof value !== "object" || depth < 0) return null;
     if (seen.has(value)) return null;
@@ -1110,6 +1116,7 @@
     );
   }
 
+  // app signal scope 没有稳定全局入口，只能从 React fiber 链里按结构特征反查。
   function findAppSignalScopeInValue(value, depth, seen) {
     if (!value || typeof value !== "object" || depth < 0) return null;
     if (seen.has(value)) return null;
@@ -1228,6 +1235,7 @@
     return null;
   }
 
+  // hashed asset 文件名会随版本变化；先从已加载资源定位，fallback 只保留当前版本的相对路径。
   function findLoadedAssetUrl(fragment, fallbackPath) {
     const selectors = [
       `script[src*="${fragment}"]`,
@@ -1284,6 +1292,7 @@
     return null;
   }
 
+  // setting-storage 的 rt helper 会解开嵌套 signal；缺失时退回 scope.get 的两段读取。
   function readSignalValue(scope, selector, argument) {
     if (!scope || !selector) return null;
 
@@ -1346,6 +1355,7 @@
     return null;
   }
 
+  // 流式响应可能是 JSONL，也可能是一整段 JSON；两种都按同一套 reading 规则落库。
   function parsePayloadText(text, source, ownerConversationId) {
     const clipped = String(text || "").slice(0, MAX_CAPTURE_TEXT_LENGTH);
     const textReading = parseTextForReading(clipped, source);
@@ -1380,6 +1390,7 @@
     }
   }
 
+  // 捕获层会先缓存非当前会话读数，只有会话匹配时才推动当前 UI 刷新。
   function acceptReading(reading) {
     if (!reading) return;
 
@@ -1423,6 +1434,7 @@
     return captureState.NativeWebSocket || window.WebSocket;
   }
 
+  // fetch 捕获只 clone 小体积文本响应，不消费原 response，避免影响 Codex 自己的请求链。
   function installFetchCapture() {
     const captureState = getCaptureState();
     if (captureState.fetchVersion === SCRIPT_VERSION || typeof window.fetch !== "function") return;
@@ -1463,6 +1475,7 @@
     window.__codexContextMeterFetchPatched = true;
   }
 
+  // WebSocket 构造器需要保留原型和 readyState 常量，减少对页面侧类型判断的影响。
   function installWebSocketCapture() {
     const captureState = getCaptureState();
     if (captureState.webSocketVersion === SCRIPT_VERSION || typeof window.WebSocket !== "function") return;
@@ -1509,6 +1522,7 @@
     window.__codexContextMeterWebSocketPatched = true;
   }
 
+  // postMessage 监听器每次重装前先移除旧实例，支持 Codex++ 反复重新加载用户脚本。
   function installPostMessageCapture() {
     const captureState = getCaptureState();
     if (captureState.messageListener) {
@@ -1730,6 +1744,7 @@
     }
   }
 
+  // window 全局对象很大，先缓存候选 key；只有主路径失败时才读取这些值。
   function scanLikelyWindowState() {
     const parts = [];
     const seen = new WeakSet();
@@ -1799,6 +1814,7 @@
     return parts.join("\n").slice(0, MAX_TEXT_LENGTH);
   }
 
+  // 这里直接找结构化 usage 对象，比把 window 状态拼成文本再正则解析更便宜。
   function scanWindowForContextUsage(activeConversationId) {
     const seen = new WeakSet();
     const now = Date.now();
@@ -1882,6 +1898,7 @@
       state.expensiveFallbackScannedAt = now;
       state.expensiveFallbackConversationId = activeConversationId;
 
+      // 以下 fallback 从“结构化且便宜”逐步降级到“文本化且昂贵”，顺序不要随意调换。
       const windowReading = scanWindowForContextUsage(activeConversationId);
       if (windowReading) {
         state.switchRetryUntil = 0;
