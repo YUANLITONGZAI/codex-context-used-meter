@@ -4,7 +4,7 @@
   const STYLE_ID = "codex-context-meter-style";
   const ROOT_ID = "codex-context-meter";
   const CAPTURE_STATE_KEY = "__codexContextMeterCaptureState";
-  const SCRIPT_VERSION = 28;
+  const SCRIPT_VERSION = 29;
   const UPDATE_INTERVAL_MS = 5000;
   const SLOW_SCAN_INTERVAL_MS = 30000;
   const SWITCH_RETRY_WINDOW_MS = 8000;
@@ -273,6 +273,8 @@
   }
 
   function hasThreadContentSurface() {
+    if (!isConversationWindow()) return false;
+
     const main = document.querySelector("main");
     if (!main) return false;
 
@@ -283,6 +285,14 @@
       main.querySelector('[data-testid*="thread"], [data-test-id*="thread"]') ||
       main.querySelector('[data-testid*="conversation"], [data-test-id*="conversation"]')
     );
+  }
+
+  function isConversationWindow() {
+    const url = new URL(location.href);
+    const route = `${url.pathname} ${url.search} ${url.hash}`.toLowerCase();
+    if (route.includes("avatar-overlay") || route.includes("pet")) return false;
+
+    return url.protocol === "app:" && url.pathname.endsWith("/index.html");
   }
 
   function hideMeter(root, value, fill, title) {
