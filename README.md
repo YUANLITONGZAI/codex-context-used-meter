@@ -22,6 +22,23 @@
 
 然后在 Codex++ 管理工具里点击重新加载用户脚本，或者重启 Codex++。
 
+## 让 Agent 自动安装
+
+你也可以直接复制下面这段 Prompt 给 Codex / Claude / 其他本机 Agent，让它帮你安装：
+
+```text
+请帮我安装 Codex Context Used Meter：
+
+1. 确认这台机器已经安装 Codex++。
+2. 创建 Codex++ 用户脚本目录：%APPDATA%\Codex++\user_scripts
+3. 从 https://raw.githubusercontent.com/Minghou-Lei/codex-context-used-meter/main/codex-context-used-meter.js 下载脚本。
+4. 保存为：%APPDATA%\Codex++\user_scripts\codex-context-used-meter.js
+5. 检查文件存在，并确认脚本内容里包含 __codexContextMeterInstalled。
+6. 提醒我在 Codex++ 里点击“重新加载用户脚本”，或者重启 Codex++。
+
+不要修改 Codex App 的安装目录。
+```
+
 ## 注意
 
 这个脚本不是 Tampermonkey 脚本，也不是 Node.js 脚本。它是在 Codex App 渲染页里运行的 Codex++ 用户脚本。
@@ -59,6 +76,23 @@ Put `codex-context-used-meter.js` in the Codex++ user script directory:
 ```
 
 Then reload user scripts from the Codex++ manager, or restart Codex++.
+
+## Agent Install Prompt
+
+You can also copy this prompt into Codex, Claude, or another local agent and let it install the script for you:
+
+```text
+Please install Codex Context Used Meter for me:
+
+1. Confirm Codex++ is installed on this machine.
+2. Create the Codex++ user script directory: %APPDATA%\Codex++\user_scripts
+3. Download the script from https://raw.githubusercontent.com/Minghou-Lei/codex-context-used-meter/main/codex-context-used-meter.js
+4. Save it as: %APPDATA%\Codex++\user_scripts\codex-context-used-meter.js
+5. Check that the file exists and that its content contains __codexContextMeterInstalled.
+6. Remind me to click "Reload user scripts" in Codex++, or restart Codex++.
+
+Do not modify the Codex App installation directory.
+```
 
 ## Notes
 
