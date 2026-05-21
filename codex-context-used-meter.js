@@ -4,7 +4,7 @@
   const STYLE_ID = "codex-context-meter-style";
   const ROOT_ID = "codex-context-meter";
   const CAPTURE_STATE_KEY = "__codexContextMeterCaptureState";
-  const SCRIPT_VERSION = 29;
+  const SCRIPT_VERSION = 30;
   const UPDATE_INTERVAL_MS = 5000;
   const SLOW_SCAN_INTERVAL_MS = 30000;
   const SWITCH_RETRY_WINDOW_MS = 8000;
@@ -171,18 +171,26 @@
         right: calc(100% + 10px);
         top: 50%;
         z-index: 1;
-        color: #fb7185;
+        color: #fff7ed;
+        background: linear-gradient(92deg, #fff7ed 0%, #fecdd3 38%, #fb7185 68%, #f97316 100%);
+        -webkit-background-clip: text;
+        background-clip: text;
+        -webkit-text-fill-color: transparent;
         font-size: 14px;
-        font-weight: 800;
+        font-weight: 850;
         line-height: 1;
         opacity: 0;
-        text-shadow: 0 1px 0 rgba(0, 0, 0, 0.45), 0 0 12px rgba(251, 113, 133, 0.5);
+        filter: drop-shadow(0 1px 0 rgba(0, 0, 0, 0.78))
+          drop-shadow(0 3px 8px rgba(0, 0, 0, 0.58))
+          drop-shadow(0 0 14px rgba(251, 113, 133, 0.56))
+          drop-shadow(0 0 26px rgba(249, 115, 22, 0.24));
+        text-shadow: 0 0 1px rgba(255, 255, 255, 0.45);
         transform: translate(44px, -50%) scale(0.72);
         transform-origin: right center;
         animation: ccm-hit-pop 3000ms cubic-bezier(0.16, 0.84, 0.24, 1) forwards;
         pointer-events: none;
         white-space: nowrap;
-        will-change: opacity, transform;
+        will-change: opacity, transform, filter;
       }
 
       @keyframes ccm-hit-pop {
