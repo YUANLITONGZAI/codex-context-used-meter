@@ -14,7 +14,7 @@
 
 - 显示 `Context Left xx.x%`。
 - 显示已用 / 总上下文 token 数。
-- 尽量按当前打开的会话读取，不固定到某一个旧会话。
+- 尽量按当前打开的会话读取，不固定到其他会话。
 - 没读到有效上下文信息时自动隐藏，不占界面。
 - 只在 Codex 对话窗口显示，不在 Codex++ 其他页面乱显示。
 
@@ -37,14 +37,15 @@
 复制空白配置到本机私有目录：
 
 ```powershell
-New-Item -ItemType Directory -Force "$env:APPDATA\codex-context-used-meter"; Copy-Item ".\examples\provider-config.blank.json" "$env:APPDATA\codex-context-used-meter\provider-config.json"; Copy-Item ".\examples\provider-secrets.blank.json" "$env:APPDATA\codex-context-used-meter\provider-secrets.json"
+New-Item -ItemType Directory -Force "$env:APPDATA\codex-context-used-meter"; Copy-Item ".\examples\provider-config.blank.json" "$env:APPDATA\codex-context-used-meter\provider-config.json"; Copy-Item ".\examples\provider-secrets.blank.json" "$env:APPDATA\codex-context-used-meter\provider-secrets.json"; Copy-Item ".\examples\ui-config.blank.json" "$env:APPDATA\codex-context-used-meter\ui-config.json"
 ```
 
-然后编辑这两个本机文件：
+然后编辑这些本机文件：
 
 ```text
 %APPDATA%\codex-context-used-meter\provider-config.json
 %APPDATA%\codex-context-used-meter\provider-secrets.json
+%APPDATA%\codex-context-used-meter\ui-config.json
 ```
 
 `provider-config.json` 里填写：
@@ -79,7 +80,7 @@ Provider 框显示的名字来自 `provider-config.json` 里的 `displayName`。
 
 Provider 金额默认刷新周期是 10 秒，可以在 `provider-config.json` 里的 `refreshIntervalMs` 调整。
 
-Context 条最左边的黄/橙斜线表示“快要压缩了”：当剩余上下文掉进这段区域，就说明这个会话接近压缩点。斜线区域默认占左侧 20%，可以用 `provider-config.json` 里的 `ui.context.compressionWarningLeftPercent` 调整。进度条颜色也会更早提醒：默认剩余 60% 开始变提示色，35% 变预警色，20% 变警告色。
+UI 配置单独放在 `ui-config.json`，不要塞进 Provider 配置。Context 条最左边的黄/橙斜线表示“快要压缩了”：当剩余上下文掉进这段区域，就说明这个会话接近压缩点。斜线区域默认占左侧 20%，可以用 `ui-config.json` 里的 `context.compressionWarningLeftPercent` 调整。Context 和 Provider 余额条的颜色分档分别由 `context.levelThresholds` 和 `provider.levelThresholds` 控制，默认剩余 60% 开始提示，50% 进入预警，40% 进入警告，30% 进入严重警告。
 
 只测试 provider 请求和响应解析，不注入 Codex 页面：
 
@@ -126,11 +127,13 @@ Provider 配置和脚本安装是两件事。脚本安装只负责显示 Context
 5. 创建私有配置目录：%APPDATA%\codex-context-used-meter
 6. 如果 %APPDATA%\codex-context-used-meter\provider-config.json 不存在，就从 examples\provider-config.blank.json 复制一份。
 7. 如果 %APPDATA%\codex-context-used-meter\provider-secrets.json 不存在，就从 examples\provider-secrets.blank.json 复制一份。
-8. 只在 %APPDATA%\codex-context-used-meter\provider-config.json 里填写非密钥配置：provider id、displayName、baseUrl、endpointPath、auth.accessTokenSecret、可选 userHeader.name、userHeader.valueSecret、refreshIntervalMs、quota.amountDivisor。
-9. 只在 %APPDATA%\codex-context-used-meter\provider-secrets.json 里填写真实 token 和真实用户 ID。
-10. 不要在聊天里回显 token、用户 ID、真实服务商地址或完整配置文件内容；需要确认时只输出字段是否存在、HTTP 状态、provider 是否 active。
-11. 运行 .\tools\install-provider-supervisor.ps1，让 Provider helper 跟随 Codex 自动启动和停止。
-12. 用 node .\tools\provider-helper.js --once --no-cdp --print-summary 做一次验证；如果输出里可能包含敏感信息，先改成只汇总验证结果再展示。
+8. 如果 %APPDATA%\codex-context-used-meter\ui-config.json 不存在，就从 examples\ui-config.blank.json 复制一份。
+9. 只在 %APPDATA%\codex-context-used-meter\provider-config.json 里填写非密钥配置：provider id、displayName、baseUrl、endpointPath、auth.accessTokenSecret、可选 userHeader.name、userHeader.valueSecret、refreshIntervalMs、quota.amountDivisor。
+10. 只在 %APPDATA%\codex-context-used-meter\provider-secrets.json 里填写真实 token 和真实用户 ID。
+11. 如果要调整 Context 或 Provider 余额条颜色阈值，只改 %APPDATA%\codex-context-used-meter\ui-config.json。
+12. 不要在聊天里回显 token、用户 ID、真实服务商地址或完整配置文件内容；需要确认时只输出字段是否存在、HTTP 状态、provider 是否 active。
+13. 运行 .\tools\install-provider-supervisor.ps1，让 Provider helper 跟随 Codex 自动启动和停止。
+14. 用 node .\tools\provider-helper.js --once --no-cdp --print-summary 做一次验证；如果输出里可能包含敏感信息，先改成只汇总验证结果再展示。
 ```
 
 ## 注意
@@ -165,7 +168,7 @@ It shows the current conversation's remaining context at the top of the Codex Ap
 
 - Shows `Context Left xx.x%`.
 - Shows used / total context tokens.
-- Tries to follow the currently opened conversation instead of sticking to an old one.
+- Tries to follow the currently opened conversation instead of another conversation.
 - Hides itself when no valid context usage value is available.
 - Only appears in Codex conversation views, not in unrelated Codex++ pages.
 
@@ -188,7 +191,7 @@ Tokens, user IDs, and provider endpoints stay in private local config files. The
 Copy the blank config to a private local directory:
 
 ```powershell
-New-Item -ItemType Directory -Force "$env:APPDATA\codex-context-used-meter"; Copy-Item ".\examples\provider-config.blank.json" "$env:APPDATA\codex-context-used-meter\provider-config.json"; Copy-Item ".\examples\provider-secrets.blank.json" "$env:APPDATA\codex-context-used-meter\provider-secrets.json"
+New-Item -ItemType Directory -Force "$env:APPDATA\codex-context-used-meter"; Copy-Item ".\examples\provider-config.blank.json" "$env:APPDATA\codex-context-used-meter\provider-config.json"; Copy-Item ".\examples\provider-secrets.blank.json" "$env:APPDATA\codex-context-used-meter\provider-secrets.json"; Copy-Item ".\examples\ui-config.blank.json" "$env:APPDATA\codex-context-used-meter\ui-config.json"
 ```
 
 Edit these local files:
@@ -196,6 +199,7 @@ Edit these local files:
 ```text
 %APPDATA%\codex-context-used-meter\provider-config.json
 %APPDATA%\codex-context-used-meter\provider-secrets.json
+%APPDATA%\codex-context-used-meter\ui-config.json
 ```
 
 Fill `provider-config.json` with:
@@ -230,7 +234,7 @@ The provider card name comes from `displayName` in `provider-config.json`. Use y
 
 The default provider balance refresh interval is 10 seconds. You can change it with `refreshIntervalMs` in `provider-config.json`.
 
-The yellow/orange stripes on the left side of the Context bar mean "getting close to compaction." When the remaining context falls into that striped area, the conversation is near the compaction point. The striped zone defaults to the leftmost 20% and can be changed with `ui.context.compressionWarningLeftPercent` in `provider-config.json`. The bar also changes color earlier: by default it enters notice at 60% left, warn at 35% left, and danger at 20% left.
+UI settings live in `ui-config.json`, not in the Provider config. The yellow/orange stripes on the left side of the Context bar mean "getting close to compaction." When the remaining context falls into that striped area, the conversation is near the compaction point. The striped zone defaults to the leftmost 20% and can be changed with `context.compressionWarningLeftPercent` in `ui-config.json`. Context and Provider bar colors are controlled separately with `context.levelThresholds` and `provider.levelThresholds`; by default the bar enters notice at 60% left, warn at 50% left, danger at 40% left, and critical at 30% left.
 
 Test provider fetching and response parsing without injecting the Codex page:
 
@@ -277,11 +281,13 @@ Please configure the Provider balance card for Codex Context Used Meter:
 5. Create the private config directory: %APPDATA%\codex-context-used-meter
 6. If %APPDATA%\codex-context-used-meter\provider-config.json does not exist, copy it from examples\provider-config.blank.json.
 7. If %APPDATA%\codex-context-used-meter\provider-secrets.json does not exist, copy it from examples\provider-secrets.blank.json.
-8. Only write non-secret settings to %APPDATA%\codex-context-used-meter\provider-config.json: provider id, displayName, baseUrl, endpointPath, auth.accessTokenSecret, optional userHeader.name, userHeader.valueSecret, refreshIntervalMs, and quota.amountDivisor.
-9. Only write the real token and real user ID to %APPDATA%\codex-context-used-meter\provider-secrets.json.
-10. Do not echo tokens, user IDs, real provider endpoints, or full config file contents back into chat. When confirming, only report whether fields exist, the HTTP status, and whether the provider is active.
-11. Run .\tools\install-provider-supervisor.ps1 so the Provider helper starts and stops with Codex.
-12. Run node .\tools\provider-helper.js --once --no-cdp --print-summary once to verify. If the output may contain sensitive data, summarize the verification result instead of printing it.
+8. If %APPDATA%\codex-context-used-meter\ui-config.json does not exist, copy it from examples\ui-config.blank.json.
+9. Only write non-secret settings to %APPDATA%\codex-context-used-meter\provider-config.json: provider id, displayName, baseUrl, endpointPath, auth.accessTokenSecret, optional userHeader.name, userHeader.valueSecret, refreshIntervalMs, and quota.amountDivisor.
+10. Only write the real token and real user ID to %APPDATA%\codex-context-used-meter\provider-secrets.json.
+11. If you need to tune Context or Provider balance color thresholds, only edit %APPDATA%\codex-context-used-meter\ui-config.json.
+12. Do not echo tokens, user IDs, real provider endpoints, or full config file contents back into chat. When confirming, only report whether fields exist, the HTTP status, and whether the provider is active.
+13. Run .\tools\install-provider-supervisor.ps1 so the Provider helper starts and stops with Codex.
+14. Run node .\tools\provider-helper.js --once --no-cdp --print-summary once to verify. If the output may contain sensitive data, summarize the verification result instead of printing it.
 ```
 
 ## Notes

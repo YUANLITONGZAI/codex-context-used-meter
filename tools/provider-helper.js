@@ -7,6 +7,7 @@ const path = require("node:path");
 const DEFAULT_CONFIG_DIR = path.join(process.env.APPDATA || process.cwd(), "codex-context-used-meter");
 const DEFAULT_CONFIG_PATH = path.join(DEFAULT_CONFIG_DIR, "provider-config.json");
 const DEFAULT_SECRETS_PATH = path.join(DEFAULT_CONFIG_DIR, "provider-secrets.json");
+const DEFAULT_UI_CONFIG_PATH = path.join(DEFAULT_CONFIG_DIR, "ui-config.json");
 const DEFAULT_USER_AGENT = "CodexContextMeterProviderHelper/1.0";
 const DEFAULT_CODEX_DEBUG_PORT = 9229;
 const REQUEST_TIMEOUT_MS = 15000;
@@ -22,9 +23,17 @@ const DEFAULT_UI_CONFIG = {
   context: {
     compressionWarningLeftPercent: 20,
     levelThresholds: {
-      criticalLeftPercent: 8,
-      dangerLeftPercent: 20,
-      warnLeftPercent: 35,
+      criticalLeftPercent: 30,
+      dangerLeftPercent: 40,
+      warnLeftPercent: 50,
+      noticeLeftPercent: 60,
+    },
+  },
+  provider: {
+    levelThresholds: {
+      criticalLeftPercent: 30,
+      dangerLeftPercent: 40,
+      warnLeftPercent: 50,
       noticeLeftPercent: 60,
     },
   },
@@ -66,6 +75,7 @@ function usage() {
     "Reads private provider config, requests provider quota directly, and pushes a sanitized summary into Codex via CDP.",
     "Config:  CCM_PROVIDER_CONFIG  or %APPDATA%\\codex-context-used-meter\\provider-config.json",
     "Secrets: CCM_PROVIDER_SECRETS or %APPDATA%\\codex-context-used-meter\\provider-secrets.json",
+    "UI:      CCM_UI_CONFIG        or %APPDATA%\\codex-context-used-meter\\ui-config.json",
   ].join("\n");
 }
 
@@ -247,13 +257,21 @@ function numberOrDefault(value, fallback) {
   return Number.isFinite(number) ? number : fallback;
 }
 
+function normalizeLevelThresholds(value, defaults) {
+  const input = value && typeof value === "object" ? value : {};
+
+  return {
+    criticalLeftPercent: clampPercent(numberOrDefault(input.criticalLeftPercent, defaults.criticalLeftPercent)),
+    dangerLeftPercent: clampPercent(numberOrDefault(input.dangerLeftPercent, defaults.dangerLeftPercent)),
+    warnLeftPercent: clampPercent(numberOrDefault(input.warnLeftPercent, defaults.warnLeftPercent)),
+    noticeLeftPercent: clampPercent(numberOrDefault(input.noticeLeftPercent, defaults.noticeLeftPercent)),
+  };
+}
+
 function normalizeUiConfig(ui) {
   const input = ui && typeof ui === "object" ? ui : {};
   const context = input.context && typeof input.context === "object" ? input.context : {};
-  const thresholds = context.levelThresholds && typeof context.levelThresholds === "object"
-    ? context.levelThresholds
-    : {};
-  const defaultThresholds = DEFAULT_UI_CONFIG.context.levelThresholds;
+  const provider = input.provider && typeof input.provider === "object" ? input.provider : {};
 
   return {
     context: {
@@ -261,12 +279,16 @@ function normalizeUiConfig(ui) {
         context.compressionWarningLeftPercent,
         DEFAULT_UI_CONFIG.context.compressionWarningLeftPercent,
       )),
-      levelThresholds: {
-        criticalLeftPercent: clampPercent(numberOrDefault(thresholds.criticalLeftPercent, defaultThresholds.criticalLeftPercent)),
-        dangerLeftPercent: clampPercent(numberOrDefault(thresholds.dangerLeftPercent, defaultThresholds.dangerLeftPercent)),
-        warnLeftPercent: clampPercent(numberOrDefault(thresholds.warnLeftPercent, defaultThresholds.warnLeftPercent)),
-        noticeLeftPercent: clampPercent(numberOrDefault(thresholds.noticeLeftPercent, defaultThresholds.noticeLeftPercent)),
-      },
+      levelThresholds: normalizeLevelThresholds(
+        context.levelThresholds,
+        DEFAULT_UI_CONFIG.context.levelThresholds,
+      ),
+    },
+    provider: {
+      levelThresholds: normalizeLevelThresholds(
+        provider.levelThresholds,
+        DEFAULT_UI_CONFIG.provider.levelThresholds,
+      ),
     },
   };
 }
@@ -362,10 +384,13 @@ async function getSummary(state) {
 function loadConfig() {
   const configPath = process.env.CCM_PROVIDER_CONFIG || DEFAULT_CONFIG_PATH;
   const secretsPath = process.env.CCM_PROVIDER_SECRETS || DEFAULT_SECRETS_PATH;
+  const uiConfigPath = process.env.CCM_UI_CONFIG || DEFAULT_UI_CONFIG_PATH;
   let config = { providers: [] };
   let secrets = {};
+  let uiConfig = null;
   let configError = null;
   let secretsError = null;
+  let uiConfigError = null;
 
   try {
     config = readJsonFile(configPath, { providers: [] });
@@ -379,9 +404,16 @@ function loadConfig() {
     secretsError = error;
   }
 
+  try {
+    uiConfig = readJsonFile(uiConfigPath, null);
+  } catch (error) {
+    uiConfigError = error;
+  }
+
   if (!Array.isArray(config.providers)) config.providers = [];
   if (!config.codex || typeof config.codex !== "object") config.codex = {};
-  return { config, secrets, configPath, secretsPath, configError, secretsError };
+  config.ui = uiConfig || DEFAULT_UI_CONFIG;
+  return { config, secrets, configPath, secretsPath, uiConfigPath, configError, secretsError, uiConfigError };
 }
 
 function debugPort(config) {

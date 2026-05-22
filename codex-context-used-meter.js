@@ -8,7 +8,7 @@
   const CONFIG_KEY = "__codexContextMeterConfig";
   const PROVIDER_SUMMARY_KEY = "__codexContextMeterProviderSummary";
   const PROVIDER_SUMMARY_EVENT = "codex-context-meter-provider-summary";
-  const SCRIPT_VERSION = 47;
+  const SCRIPT_VERSION = 49;
   const UPDATE_INTERVAL_MS = 5000;
   const SLOW_SCAN_INTERVAL_MS = 30000;
   const SWITCH_RETRY_WINDOW_MS = 8000;
@@ -32,9 +32,17 @@
     context: {
       compressionWarningLeftPercent: 20,
       levelThresholds: {
-        criticalLeftPercent: 8,
-        dangerLeftPercent: 20,
-        warnLeftPercent: 35,
+        criticalLeftPercent: 30,
+        dangerLeftPercent: 40,
+        warnLeftPercent: 50,
+        noticeLeftPercent: 60,
+      },
+    },
+    provider: {
+      levelThresholds: {
+        criticalLeftPercent: 30,
+        dangerLeftPercent: 40,
+        warnLeftPercent: 50,
         noticeLeftPercent: 60,
       },
     },
@@ -489,13 +497,21 @@
     return Number.isFinite(number) ? number : fallback;
   }
 
+  function normalizeLevelThresholds(value, defaults) {
+    const input = value && typeof value === "object" ? value : {};
+
+    return {
+      criticalLeftPercent: clampPercent(numberOrDefault(input.criticalLeftPercent, defaults.criticalLeftPercent)),
+      dangerLeftPercent: clampPercent(numberOrDefault(input.dangerLeftPercent, defaults.dangerLeftPercent)),
+      warnLeftPercent: clampPercent(numberOrDefault(input.warnLeftPercent, defaults.warnLeftPercent)),
+      noticeLeftPercent: clampPercent(numberOrDefault(input.noticeLeftPercent, defaults.noticeLeftPercent)),
+    };
+  }
+
   function normalizeUiConfig(value) {
     const input = value && typeof value === "object" ? value : {};
     const context = input.context && typeof input.context === "object" ? input.context : {};
-    const levelThresholds = context.levelThresholds && typeof context.levelThresholds === "object"
-      ? context.levelThresholds
-      : {};
-    const defaults = DEFAULT_UI_CONFIG.context.levelThresholds;
+    const provider = input.provider && typeof input.provider === "object" ? input.provider : {};
 
     return {
       context: {
@@ -503,12 +519,16 @@
           context.compressionWarningLeftPercent,
           DEFAULT_UI_CONFIG.context.compressionWarningLeftPercent,
         )),
-        levelThresholds: {
-          criticalLeftPercent: clampPercent(numberOrDefault(levelThresholds.criticalLeftPercent, defaults.criticalLeftPercent)),
-          dangerLeftPercent: clampPercent(numberOrDefault(levelThresholds.dangerLeftPercent, defaults.dangerLeftPercent)),
-          warnLeftPercent: clampPercent(numberOrDefault(levelThresholds.warnLeftPercent, defaults.warnLeftPercent)),
-          noticeLeftPercent: clampPercent(numberOrDefault(levelThresholds.noticeLeftPercent, defaults.noticeLeftPercent)),
-        },
+        levelThresholds: normalizeLevelThresholds(
+          context.levelThresholds,
+          DEFAULT_UI_CONFIG.context.levelThresholds,
+        ),
+      },
+      provider: {
+        levelThresholds: normalizeLevelThresholds(
+          provider.levelThresholds,
+          DEFAULT_UI_CONFIG.provider.levelThresholds,
+        ),
       },
     };
   }
@@ -518,8 +538,9 @@
     return normalizeUiConfig(summaryConfig || window[CONFIG_KEY] || DEFAULT_UI_CONFIG);
   }
 
-  function levelForLeftPercent(leftPercent) {
-    const thresholds = state.uiConfig.context.levelThresholds;
+  function levelForLeftPercent(leftPercent, scope) {
+    const config = scope === "provider" ? state.uiConfig.provider : state.uiConfig.context;
+    const thresholds = config.levelThresholds;
     if (leftPercent <= thresholds.criticalLeftPercent) return "critical";
     if (leftPercent <= thresholds.dangerLeftPercent) return "danger";
     if (leftPercent <= thresholds.warnLeftPercent) return "warn";
@@ -669,7 +690,7 @@
     }
 
     const leftPercent = clampPercent(100 - usedPercent);
-    const level = levelForLeftPercent(leftPercent);
+    const level = levelForLeftPercent(leftPercent, "provider");
     const name = String(provider.displayName || provider.id || "Provider").slice(0, 48);
     const text = `${name} Left ${leftPercent.toFixed(1)}% ${formatMoney(usedAmount)} / ${formatMoney(totalAmount)}`;
     const width = `${leftPercent.toFixed(1)}%`;
@@ -2363,7 +2384,7 @@
       state.lastAnimatedUsedByConversationId.set(readingConversationId, reading.used);
     }
 
-    const level = levelForLeftPercent(leftPercent);
+    const level = levelForLeftPercent(leftPercent, "context");
     const compressionWarning = shouldShowCompressionWarning(leftPercent) ? "true" : "false";
     const title = `Source: ${reading.source}${reading.raw ? ` | ${reading.raw}` : ""}`;
     const text = `Context Left ${percentText}%${details}`;

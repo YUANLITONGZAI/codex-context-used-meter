@@ -1,0 +1,19 @@
+{
+  "context": {
+    "compressionWarningLeftPercent": 20,
+    "levelThresholds": {
+      "criticalLeftPercent": 30,
+      "dangerLeftPercent": 40,
+      "warnLeftPercent": 50,
+      "noticeLeftPercent": 60
+    }
+  },
+  "provider": {
+    "levelThresholds": {
+      "criticalLeftPercent": 30,
+      "dangerLeftPercent": 40,
+      "warnLeftPercent": 50,
+      "noticeLeftPercent": 60
+    }
+  }
+}

@@ -6,3 +6,4 @@ local/
 secrets.json
 provider-config.json
 provider-secrets.json
+ui-config.json
