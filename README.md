@@ -57,8 +57,6 @@ New-Item -ItemType Directory -Force "$env:APPDATA\codex-context-used-meter"; Cop
 - `userHeader.name`：服务商要求的用户 ID header 名；不需要就留空。
 - `userHeader.valueSecret`：在 `provider-secrets.json` 里保存用户 ID 的字段名；不需要就留空。
 
-不用再配置 `server.host`、`server.port` 或 `providers[].type`。余额查询不需要本地网页服务器，provider 类型目前也没有多套实现。
-
 `provider-secrets.json` 只放本机私密值，字段名要和 `provider-config.json` 里的 `accessTokenSecret` / `valueSecret` 对上。
 
 推荐安装自动管理器：
@@ -123,15 +121,16 @@ Provider 配置和脚本安装是两件事。脚本安装只负责显示 Context
 
 1. 不要修改 Codex App 安装目录，也不要把任何密钥写进 Git 仓库。
 2. 确认仓库位置是我本机的 codex-context-used-meter 项目目录。
-3. 创建私有配置目录：%APPDATA%\codex-context-used-meter
-4. 如果 %APPDATA%\codex-context-used-meter\provider-config.json 不存在，就从 examples\provider-config.blank.json 复制一份。
-5. 如果 %APPDATA%\codex-context-used-meter\provider-secrets.json 不存在，就从 examples\provider-secrets.blank.json 复制一份。
-6. 只在 %APPDATA%\codex-context-used-meter\provider-config.json 里填写非密钥配置：provider id、displayName、baseUrl、endpointPath、auth.accessTokenSecret、可选 userHeader.name、userHeader.valueSecret、refreshIntervalMs、quota.amountDivisor。
-7. 只在 %APPDATA%\codex-context-used-meter\provider-secrets.json 里填写真实 token 和真实用户 ID。
-8. 不要配置 server.host、server.port、providers[].type；这些字段已经废弃。
-9. 不要在聊天里回显 token、用户 ID、真实服务商地址或完整配置文件内容。
-10. 运行 .\tools\install-provider-supervisor.ps1，让 Provider helper 跟随 Codex 自动启动和停止。
-11. 用 node .\tools\provider-helper.js --once --no-cdp --print-summary 做一次验证，但输出前必须确认不会泄露 token 或用户 ID。
+3. 先引导我从服务商后台或接口文档里找到这些信息：Provider 显示名、API Base URL、订阅 / 余额接口路径、访问 token、是否需要额外用户 ID header、用户 ID header 名称、用户 ID 值。
+4. 明确提醒我：token 和用户 ID 属于敏感信息，应该只写入本机私有文件，不要贴到公开 issue、README、提交记录或聊天总结里。
+5. 创建私有配置目录：%APPDATA%\codex-context-used-meter
+6. 如果 %APPDATA%\codex-context-used-meter\provider-config.json 不存在，就从 examples\provider-config.blank.json 复制一份。
+7. 如果 %APPDATA%\codex-context-used-meter\provider-secrets.json 不存在，就从 examples\provider-secrets.blank.json 复制一份。
+8. 只在 %APPDATA%\codex-context-used-meter\provider-config.json 里填写非密钥配置：provider id、displayName、baseUrl、endpointPath、auth.accessTokenSecret、可选 userHeader.name、userHeader.valueSecret、refreshIntervalMs、quota.amountDivisor。
+9. 只在 %APPDATA%\codex-context-used-meter\provider-secrets.json 里填写真实 token 和真实用户 ID。
+10. 不要在聊天里回显 token、用户 ID、真实服务商地址或完整配置文件内容；需要确认时只输出字段是否存在、HTTP 状态、provider 是否 active。
+11. 运行 .\tools\install-provider-supervisor.ps1，让 Provider helper 跟随 Codex 自动启动和停止。
+12. 用 node .\tools\provider-helper.js --once --no-cdp --print-summary 做一次验证；如果输出里可能包含敏感信息，先改成只汇总验证结果再展示。
 ```
 
 ## 注意
@@ -209,8 +208,6 @@ Fill `provider-config.json` with:
 - `userHeader.name`: the provider's user ID header name; leave it empty if not needed.
 - `userHeader.valueSecret`: the key name used for the user ID in `provider-secrets.json`; leave it empty if not needed.
 
-You no longer need `server.host`, `server.port`, or `providers[].type`. Balance fetching does not use a local web server, and there is currently only one provider implementation.
-
 Only put private values in `provider-secrets.json`. Its keys must match `accessTokenSecret` / `valueSecret` from `provider-config.json`.
 
 Recommended: install the automatic supervisor:
@@ -275,15 +272,16 @@ Please configure the Provider balance card for Codex Context Used Meter:
 
 1. Do not modify the Codex App installation directory, and do not write secrets into the Git repository.
 2. Confirm the repository path is my local codex-context-used-meter project directory.
-3. Create the private config directory: %APPDATA%\codex-context-used-meter
-4. If %APPDATA%\codex-context-used-meter\provider-config.json does not exist, copy it from examples\provider-config.blank.json.
-5. If %APPDATA%\codex-context-used-meter\provider-secrets.json does not exist, copy it from examples\provider-secrets.blank.json.
-6. Only write non-secret settings to %APPDATA%\codex-context-used-meter\provider-config.json: provider id, displayName, baseUrl, endpointPath, auth.accessTokenSecret, optional userHeader.name, userHeader.valueSecret, refreshIntervalMs, and quota.amountDivisor.
-7. Only write the real token and real user ID to %APPDATA%\codex-context-used-meter\provider-secrets.json.
-8. Do not configure server.host, server.port, or providers[].type; these fields are obsolete.
-9. Do not echo tokens, user IDs, real provider endpoints, or full config file contents back into chat.
-10. Run .\tools\install-provider-supervisor.ps1 so the Provider helper starts and stops with Codex.
-11. Run node .\tools\provider-helper.js --once --no-cdp --print-summary once to verify, but only after confirming the output will not expose tokens or user IDs.
+3. First guide me to find these values in the provider dashboard or API docs: provider display name, API base URL, subscription / balance endpoint path, access token, whether an extra user ID header is required, the user ID header name, and the user ID value.
+4. Clearly remind me that tokens and user IDs are sensitive. They should only be written to private local files, never to public issues, README files, commits, or chat summaries.
+5. Create the private config directory: %APPDATA%\codex-context-used-meter
+6. If %APPDATA%\codex-context-used-meter\provider-config.json does not exist, copy it from examples\provider-config.blank.json.
+7. If %APPDATA%\codex-context-used-meter\provider-secrets.json does not exist, copy it from examples\provider-secrets.blank.json.
+8. Only write non-secret settings to %APPDATA%\codex-context-used-meter\provider-config.json: provider id, displayName, baseUrl, endpointPath, auth.accessTokenSecret, optional userHeader.name, userHeader.valueSecret, refreshIntervalMs, and quota.amountDivisor.
+9. Only write the real token and real user ID to %APPDATA%\codex-context-used-meter\provider-secrets.json.
+10. Do not echo tokens, user IDs, real provider endpoints, or full config file contents back into chat. When confirming, only report whether fields exist, the HTTP status, and whether the provider is active.
+11. Run .\tools\install-provider-supervisor.ps1 so the Provider helper starts and stops with Codex.
+12. Run node .\tools\provider-helper.js --once --no-cdp --print-summary once to verify. If the output may contain sensitive data, summarize the verification result instead of printing it.
 ```
 
 ## Notes
