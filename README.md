@@ -37,7 +37,7 @@
 复制空白配置到本机私有目录：
 
 ```powershell
-New-Item -ItemType Directory -Force "$env:APPDATA\codex-context-used-meter"; Copy-Item ".\examples\provider-config.blank.json" "$env:APPDATA\codex-context-used-meter\provider-config.json"; Copy-Item ".\examples\provider-secrets.blank.json" "$env:APPDATA\codex-context-used-meter\provider-secrets.json"; Copy-Item ".\examples\ui-config.blank.json" "$env:APPDATA\codex-context-used-meter\ui-config.json"
+New-Item -ItemType Directory -Force "$env:APPDATA\codex-context-used-meter"; Copy-Item ".\config\provider-config.json" "$env:APPDATA\codex-context-used-meter\provider-config.json"; Copy-Item ".\config\provider-secrets.json" "$env:APPDATA\codex-context-used-meter\provider-secrets.json"; Copy-Item ".\config\ui-config.json" "$env:APPDATA\codex-context-used-meter\ui-config.json"
 ```
 
 然后编辑这些本机文件：
@@ -76,7 +76,7 @@ node .\tools\provider-helper.js --once
 
 supervisor / helper 需要能访问 Codex App 的 CDP 调试端口。通常 Codex++ 启动 Codex 后会自动打开这个端口；如果你的端口不是默认值，可以在 `provider-config.json` 里配置 `codex.debugPort`，或设置环境变量 `CCM_CODEX_DEBUG_PORT`。
 
-Provider 框显示的名字来自 `provider-config.json` 里的 `displayName`。比如你可以写成自己服务商的简称；公开仓库里的示例只放通用占位名。
+Provider 框显示的名字来自 `provider-config.json` 里的 `displayName`。比如你可以写成自己服务商的简称；公开仓库里的模板只放通用占位名。
 
 Provider 金额默认刷新周期是 10 秒，可以在 `provider-config.json` 里的 `refreshIntervalMs` 调整。
 
@@ -125,9 +125,9 @@ Provider 配置和脚本安装是两件事。脚本安装只负责显示 Context
 3. 先引导我从服务商后台或接口文档里找到这些信息：Provider 显示名、API Base URL、订阅 / 余额接口路径、访问 token、是否需要额外用户 ID header、用户 ID header 名称、用户 ID 值。
 4. 明确提醒我：token 和用户 ID 属于敏感信息，应该只写入本机私有文件，不要贴到公开 issue、README、提交记录或聊天总结里。
 5. 创建私有配置目录：%APPDATA%\codex-context-used-meter
-6. 如果 %APPDATA%\codex-context-used-meter\provider-config.json 不存在，就从 examples\provider-config.blank.json 复制一份。
-7. 如果 %APPDATA%\codex-context-used-meter\provider-secrets.json 不存在，就从 examples\provider-secrets.blank.json 复制一份。
-8. 如果 %APPDATA%\codex-context-used-meter\ui-config.json 不存在，就从 examples\ui-config.blank.json 复制一份。
+6. 如果 %APPDATA%\codex-context-used-meter\provider-config.json 不存在，就从 config\provider-config.json 复制一份。
+7. 如果 %APPDATA%\codex-context-used-meter\provider-secrets.json 不存在，就从 config\provider-secrets.json 复制一份。
+8. 如果 %APPDATA%\codex-context-used-meter\ui-config.json 不存在，就从 config\ui-config.json 复制一份。
 9. 只在 %APPDATA%\codex-context-used-meter\provider-config.json 里填写非密钥配置：provider id、displayName、baseUrl、endpointPath、auth.accessTokenSecret、可选 userHeader.name、userHeader.valueSecret、refreshIntervalMs、quota.amountDivisor。
 10. 只在 %APPDATA%\codex-context-used-meter\provider-secrets.json 里填写真实 token 和真实用户 ID。
 11. 如果要调整 Context 或 Provider 余额条颜色阈值，只改 %APPDATA%\codex-context-used-meter\ui-config.json。
@@ -188,10 +188,10 @@ The script can show a provider balance card next to the Context card. The user s
 
 Tokens, user IDs, and provider endpoints stay in private local config files. The Codex renderer page only receives sanitized balance, usage, status, and expiry values.
 
-Copy the blank config to a private local directory:
+Copy the config templates to a private local directory:
 
 ```powershell
-New-Item -ItemType Directory -Force "$env:APPDATA\codex-context-used-meter"; Copy-Item ".\examples\provider-config.blank.json" "$env:APPDATA\codex-context-used-meter\provider-config.json"; Copy-Item ".\examples\provider-secrets.blank.json" "$env:APPDATA\codex-context-used-meter\provider-secrets.json"; Copy-Item ".\examples\ui-config.blank.json" "$env:APPDATA\codex-context-used-meter\ui-config.json"
+New-Item -ItemType Directory -Force "$env:APPDATA\codex-context-used-meter"; Copy-Item ".\config\provider-config.json" "$env:APPDATA\codex-context-used-meter\provider-config.json"; Copy-Item ".\config\provider-secrets.json" "$env:APPDATA\codex-context-used-meter\provider-secrets.json"; Copy-Item ".\config\ui-config.json" "$env:APPDATA\codex-context-used-meter\ui-config.json"
 ```
 
 Edit these local files:
@@ -230,7 +230,7 @@ node .\tools\provider-helper.js --once
 
 The supervisor / helper needs access to the Codex App CDP debug port. Codex++ normally opens it when launching Codex. If your port is not the default, set `codex.debugPort` in `provider-config.json`, or set `CCM_CODEX_DEBUG_PORT`.
 
-The provider card name comes from `displayName` in `provider-config.json`. Use your own provider nickname there; the public example only uses a generic placeholder.
+The provider card name comes from `displayName` in `provider-config.json`. Use your own provider nickname there; the public template only uses a generic placeholder.
 
 The default provider balance refresh interval is 10 seconds. You can change it with `refreshIntervalMs` in `provider-config.json`.
 
@@ -279,9 +279,9 @@ Please configure the Provider balance card for Codex Context Used Meter:
 3. First guide me to find these values in the provider dashboard or API docs: provider display name, API base URL, subscription / balance endpoint path, access token, whether an extra user ID header is required, the user ID header name, and the user ID value.
 4. Clearly remind me that tokens and user IDs are sensitive. They should only be written to private local files, never to public issues, README files, commits, or chat summaries.
 5. Create the private config directory: %APPDATA%\codex-context-used-meter
-6. If %APPDATA%\codex-context-used-meter\provider-config.json does not exist, copy it from examples\provider-config.blank.json.
-7. If %APPDATA%\codex-context-used-meter\provider-secrets.json does not exist, copy it from examples\provider-secrets.blank.json.
-8. If %APPDATA%\codex-context-used-meter\ui-config.json does not exist, copy it from examples\ui-config.blank.json.
+6. If %APPDATA%\codex-context-used-meter\provider-config.json does not exist, copy it from config\provider-config.json.
+7. If %APPDATA%\codex-context-used-meter\provider-secrets.json does not exist, copy it from config\provider-secrets.json.
+8. If %APPDATA%\codex-context-used-meter\ui-config.json does not exist, copy it from config\ui-config.json.
 9. Only write non-secret settings to %APPDATA%\codex-context-used-meter\provider-config.json: provider id, displayName, baseUrl, endpointPath, auth.accessTokenSecret, optional userHeader.name, userHeader.valueSecret, refreshIntervalMs, and quota.amountDivisor.
 10. Only write the real token and real user ID to %APPDATA%\codex-context-used-meter\provider-secrets.json.
 11. If you need to tune Context or Provider balance color thresholds, only edit %APPDATA%\codex-context-used-meter\ui-config.json.
