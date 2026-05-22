@@ -111,6 +111,8 @@ node .\tools\provider-helper.js --once --no-cdp --print-summary
 6. 提醒我在 Codex++ 里点击“重新加载用户脚本”，或者重启 Codex++。
 
 不要修改 Codex App 的安装目录。
+
+如果我还要配置 Provider 余额框，请先读取 @https://github.com/Minghou-Lei/codex-context-used-meter/blob/main/config/README.md 再继续。
 ```
 
 ## 让 Agent 自动配置 Provider
@@ -121,19 +123,20 @@ Provider 配置和脚本安装是两件事。脚本安装只负责显示 Context
 请帮我给 Codex Context Used Meter 配置 Provider 余额框：
 
 1. 不要修改 Codex App 安装目录，也不要把任何密钥写进 Git 仓库。
-2. 确认仓库位置是我本机的 codex-context-used-meter 项目目录。
-3. 先引导我从服务商后台或接口文档里找到这些信息：Provider 显示名、API Base URL、订阅 / 余额接口路径、访问 token、是否需要额外用户 ID header、用户 ID header 名称、用户 ID 值。
-4. 明确提醒我：token 和用户 ID 属于敏感信息，应该只写入本机私有文件，不要贴到公开 issue、README、提交记录或聊天总结里。
-5. 创建私有配置目录：%APPDATA%\codex-context-used-meter
-6. 如果 %APPDATA%\codex-context-used-meter\provider-config.json 不存在，就从 config\provider-config.json 复制一份。
-7. 如果 %APPDATA%\codex-context-used-meter\provider-secrets.json 不存在，就从 config\provider-secrets.json 复制一份。
-8. 如果 %APPDATA%\codex-context-used-meter\ui-config.json 不存在，就从 config\ui-config.json 复制一份。
-9. 只在 %APPDATA%\codex-context-used-meter\provider-config.json 里填写非密钥配置：provider id、displayName、baseUrl、endpointPath、auth.accessTokenSecret、可选 userHeader.name、userHeader.valueSecret、refreshIntervalMs、quota.amountDivisor。
-10. 只在 %APPDATA%\codex-context-used-meter\provider-secrets.json 里填写真实 token 和真实用户 ID。
-11. 如果要调整 Context 或 Provider 余额条颜色阈值，只改 %APPDATA%\codex-context-used-meter\ui-config.json。
-12. 不要在聊天里回显 token、用户 ID、真实服务商地址或完整配置文件内容；需要确认时只输出字段是否存在、HTTP 状态、provider 是否 active。
-13. 运行 .\tools\install-provider-supervisor.ps1，让 Provider helper 跟随 Codex 自动启动和停止。
-14. 用 node .\tools\provider-helper.js --once --no-cdp --print-summary 做一次验证；如果输出里可能包含敏感信息，先改成只汇总验证结果再展示。
+2. 先读取 @https://github.com/Minghou-Lei/codex-context-used-meter/blob/main/config/README.md，按里面的字段说明执行。
+3. 确认仓库位置是我本机的 codex-context-used-meter 项目目录。
+4. 先引导我从服务商后台或接口文档里找到这些信息：Provider 显示名、API Base URL、订阅 / 余额接口路径、访问 token、是否需要额外用户 ID header、用户 ID header 名称、用户 ID 值。
+5. 明确提醒我：token 和用户 ID 属于敏感信息，应该只写入本机私有文件，不要贴到公开 issue、README、提交记录或聊天总结里。
+6. 创建私有配置目录：%APPDATA%\codex-context-used-meter
+7. 如果 %APPDATA%\codex-context-used-meter\provider-config.json 不存在，就从 config\provider-config.json 复制一份。
+8. 如果 %APPDATA%\codex-context-used-meter\provider-secrets.json 不存在，就从 config\provider-secrets.json 复制一份。
+9. 如果 %APPDATA%\codex-context-used-meter\ui-config.json 不存在，就从 config\ui-config.json 复制一份。
+10. 只在 %APPDATA%\codex-context-used-meter\provider-config.json 里填写非密钥配置：provider id、displayName、baseUrl、endpointPath、auth.accessTokenSecret、可选 userHeader.name、userHeader.valueSecret、refreshIntervalMs、quota.amountDivisor。
+11. 只在 %APPDATA%\codex-context-used-meter\provider-secrets.json 里填写真实 token 和真实用户 ID。
+12. 如果要调整 Context 或 Provider 余额条颜色阈值，只改 %APPDATA%\codex-context-used-meter\ui-config.json。
+13. 不要在聊天里回显 token、用户 ID、真实服务商地址或完整配置文件内容；需要确认时只输出字段是否存在、HTTP 状态、provider 是否 active。
+14. 运行 .\tools\install-provider-supervisor.ps1，让 Provider helper 跟随 Codex 自动启动和停止。
+15. 用 node .\tools\provider-helper.js --once --no-cdp --print-summary 做一次验证；如果输出里可能包含敏感信息，先改成只汇总验证结果再展示。
 ```
 
 ## 注意
@@ -265,6 +268,8 @@ Please install Codex Context Used Meter for me:
 6. Remind me to click "Reload user scripts" in Codex++, or restart Codex++.
 
 Do not modify the Codex App installation directory.
+
+If I also want the Provider balance card configured, read @https://github.com/Minghou-Lei/codex-context-used-meter/blob/main/config/README.md before continuing.
 ```
 
 ## Provider Setup Prompt
@@ -275,19 +280,20 @@ Provider setup is separate from script installation. Script installation only sh
 Please configure the Provider balance card for Codex Context Used Meter:
 
 1. Do not modify the Codex App installation directory, and do not write secrets into the Git repository.
-2. Confirm the repository path is my local codex-context-used-meter project directory.
-3. First guide me to find these values in the provider dashboard or API docs: provider display name, API base URL, subscription / balance endpoint path, access token, whether an extra user ID header is required, the user ID header name, and the user ID value.
-4. Clearly remind me that tokens and user IDs are sensitive. They should only be written to private local files, never to public issues, README files, commits, or chat summaries.
-5. Create the private config directory: %APPDATA%\codex-context-used-meter
-6. If %APPDATA%\codex-context-used-meter\provider-config.json does not exist, copy it from config\provider-config.json.
-7. If %APPDATA%\codex-context-used-meter\provider-secrets.json does not exist, copy it from config\provider-secrets.json.
-8. If %APPDATA%\codex-context-used-meter\ui-config.json does not exist, copy it from config\ui-config.json.
-9. Only write non-secret settings to %APPDATA%\codex-context-used-meter\provider-config.json: provider id, displayName, baseUrl, endpointPath, auth.accessTokenSecret, optional userHeader.name, userHeader.valueSecret, refreshIntervalMs, and quota.amountDivisor.
-10. Only write the real token and real user ID to %APPDATA%\codex-context-used-meter\provider-secrets.json.
-11. If you need to tune Context or Provider balance color thresholds, only edit %APPDATA%\codex-context-used-meter\ui-config.json.
-12. Do not echo tokens, user IDs, real provider endpoints, or full config file contents back into chat. When confirming, only report whether fields exist, the HTTP status, and whether the provider is active.
-13. Run .\tools\install-provider-supervisor.ps1 so the Provider helper starts and stops with Codex.
-14. Run node .\tools\provider-helper.js --once --no-cdp --print-summary once to verify. If the output may contain sensitive data, summarize the verification result instead of printing it.
+2. First read @https://github.com/Minghou-Lei/codex-context-used-meter/blob/main/config/README.md and follow its field descriptions.
+3. Confirm the repository path is my local codex-context-used-meter project directory.
+4. First guide me to find these values in the provider dashboard or API docs: provider display name, API base URL, subscription / balance endpoint path, access token, whether an extra user ID header is required, the user ID header name, and the user ID value.
+5. Clearly remind me that tokens and user IDs are sensitive. They should only be written to private local files, never to public issues, README files, commits, or chat summaries.
+6. Create the private config directory: %APPDATA%\codex-context-used-meter
+7. If %APPDATA%\codex-context-used-meter\provider-config.json does not exist, copy it from config\provider-config.json.
+8. If %APPDATA%\codex-context-used-meter\provider-secrets.json does not exist, copy it from config\provider-secrets.json.
+9. If %APPDATA%\codex-context-used-meter\ui-config.json does not exist, copy it from config\ui-config.json.
+10. Only write non-secret settings to %APPDATA%\codex-context-used-meter\provider-config.json: provider id, displayName, baseUrl, endpointPath, auth.accessTokenSecret, optional userHeader.name, userHeader.valueSecret, refreshIntervalMs, and quota.amountDivisor.
+11. Only write the real token and real user ID to %APPDATA%\codex-context-used-meter\provider-secrets.json.
+12. If you need to tune Context or Provider balance color thresholds, only edit %APPDATA%\codex-context-used-meter\ui-config.json.
+13. Do not echo tokens, user IDs, real provider endpoints, or full config file contents back into chat. When confirming, only report whether fields exist, the HTTP status, and whether the provider is active.
+14. Run .\tools\install-provider-supervisor.ps1 so the Provider helper starts and stops with Codex.
+15. Run node .\tools\provider-helper.js --once --no-cdp --print-summary once to verify. If the output may contain sensitive data, summarize the verification result instead of printing it.
 ```
 
 ## Notes
