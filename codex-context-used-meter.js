@@ -8,7 +8,7 @@
   const CONFIG_KEY = "__codexContextMeterConfig";
   const PROVIDER_SUMMARY_KEY = "__codexContextMeterProviderSummary";
   const PROVIDER_SUMMARY_EVENT = "codex-context-meter-provider-summary";
-  const SCRIPT_VERSION = 46;
+  const SCRIPT_VERSION = 47;
   const UPDATE_INTERVAL_MS = 5000;
   const SLOW_SCAN_INTERVAL_MS = 30000;
   const SWITCH_RETRY_WINDOW_MS = 8000;
@@ -362,9 +362,7 @@
         text-shadow: 0 0 1px rgba(255, 255, 255, 0.45);
         transform: translate(44px, -50%) scale(0.72);
         transform-origin: right center;
-        animation:
-          ccm-hit-pop 5000ms cubic-bezier(0.16, 0.84, 0.24, 1) forwards,
-          ccm-hit-fade 5000ms linear forwards;
+        animation: ccm-hit-pop 3000ms cubic-bezier(0.16, 0.84, 0.24, 1) forwards;
         pointer-events: none;
         white-space: nowrap;
         will-change: opacity, transform, filter;
@@ -375,60 +373,44 @@
         right: auto;
         transform: translate(-44px, -50%) scale(0.72);
         transform-origin: left center;
-        animation-name: ccm-provider-hit-pop, ccm-hit-fade;
+        animation-name: ccm-provider-hit-pop;
       }
 
       @keyframes ccm-hit-pop {
         0% {
+          opacity: 0;
           transform: translate(44px, -50%) scale(0.72);
         }
         12% {
+          opacity: 1;
           transform: translate(8px, -50%) scale(1);
         }
-        45% {
-          transform: translate(-92px, -50%) scale(1.56);
-        }
-        78% {
-          transform: translate(-144px, -50%) scale(1.92);
+        72% {
+          opacity: 1;
+          transform: translate(-128px, -50%) scale(1.82);
         }
         100% {
+          opacity: 0;
           transform: translate(-176px, -50%) scale(2.08);
         }
       }
 
       @keyframes ccm-provider-hit-pop {
         0% {
+          opacity: 0;
           transform: translate(-44px, -50%) scale(0.72);
         }
         12% {
+          opacity: 1;
           transform: translate(-8px, -50%) scale(1);
         }
-        45% {
-          transform: translate(92px, -50%) scale(1.56);
-        }
-        78% {
-          transform: translate(144px, -50%) scale(1.92);
+        72% {
+          opacity: 1;
+          transform: translate(128px, -50%) scale(1.82);
         }
         100% {
+          opacity: 0;
           transform: translate(176px, -50%) scale(2.08);
-        }
-      }
-
-      @keyframes ccm-hit-fade {
-        0% {
-          opacity: 0;
-        }
-        10% {
-          opacity: 1;
-        }
-        42% {
-          opacity: 1;
-        }
-        70% {
-          opacity: 0.45;
-        }
-        100% {
-          opacity: 0;
         }
       }
     `;
