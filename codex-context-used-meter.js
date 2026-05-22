@@ -8,7 +8,7 @@
   const CONFIG_KEY = "__codexContextMeterConfig";
   const PROVIDER_SUMMARY_KEY = "__codexContextMeterProviderSummary";
   const PROVIDER_SUMMARY_EVENT = "codex-context-meter-provider-summary";
-  const SCRIPT_VERSION = 43;
+  const SCRIPT_VERSION = 44;
   const UPDATE_INTERVAL_MS = 5000;
   const SLOW_SCAN_INTERVAL_MS = 30000;
   const SWITCH_RETRY_WINDOW_MS = 8000;
@@ -362,7 +362,7 @@
         text-shadow: 0 0 1px rgba(255, 255, 255, 0.45);
         transform: translate(44px, -50%) scale(0.72);
         transform-origin: right center;
-        animation: ccm-hit-pop 3000ms cubic-bezier(0.16, 0.84, 0.24, 1) forwards;
+        animation: ccm-hit-pop 5000ms cubic-bezier(0.16, 0.84, 0.24, 1) forwards;
         pointer-events: none;
         white-space: nowrap;
         will-change: opacity, transform, filter;
