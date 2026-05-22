@@ -6,9 +6,9 @@
 
 ## 效果展示
 
-<video src="assets/codex-context-meter-demo.mp4" controls width="100%"></video>
+![Codex Context Used Meter 效果展示](assets/codex-context-meter-demo.gif)
 
-[打不开视频时，点这里查看演示](assets/codex-context-meter-demo.mp4)
+[查看 MP4 高清演示](assets/codex-context-meter-demo.mp4)
 
 ## 这是干什么的
 
@@ -158,9 +158,9 @@ It shows the current conversation's remaining context at the top of the Codex Ap
 
 ## Demo
 
-<video src="assets/codex-context-meter-demo.mp4" controls width="100%"></video>
+![Codex Context Used Meter demo](assets/codex-context-meter-demo.gif)
 
-[Watch the demo video](assets/codex-context-meter-demo.mp4)
+[Watch the MP4 demo](assets/codex-context-meter-demo.mp4)
 
 ## What It Does
 
