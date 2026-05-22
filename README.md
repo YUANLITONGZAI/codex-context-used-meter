@@ -51,6 +51,8 @@ New-Item -ItemType Directory -Force "$env:APPDATA\codex-context-used-meter"; Cop
 - `userHeader.name`：服务商要求的用户 ID header 名；不需要就留空。
 - `userHeader.valueSecret`：在 `provider-secrets.json` 里保存用户 ID 的字段名；不需要就留空。
 
+不用再配置 `server.host`、`server.port` 或 `providers[].type`。余额查询不需要本地网页服务器，provider 类型目前也没有多套实现。
+
 `provider-secrets.json` 只放本机私密值，字段名要和 `provider-config.json` 里的 `accessTokenSecret` / `valueSecret` 对上。
 
 推荐安装自动管理器：
@@ -104,6 +106,26 @@ node .\tools\provider-helper.js --once --no-cdp --print-summary
 6. 提醒我在 Codex++ 里点击“重新加载用户脚本”，或者重启 Codex++。
 
 不要修改 Codex App 的安装目录。
+```
+
+## 让 Agent 自动配置 Provider
+
+Provider 配置和脚本安装是两件事。脚本安装只负责显示 Context；Provider 配置会写入你的服务商地址、token、用户 ID 等私密信息。可以把下面这段单独复制给本机 Agent：
+
+```text
+请帮我给 Codex Context Used Meter 配置 Provider 余额框：
+
+1. 不要修改 Codex App 安装目录，也不要把任何密钥写进 Git 仓库。
+2. 确认仓库位置是我本机的 codex-context-used-meter 项目目录。
+3. 创建私有配置目录：%APPDATA%\codex-context-used-meter
+4. 如果 %APPDATA%\codex-context-used-meter\provider-config.json 不存在，就从 examples\provider-config.blank.json 复制一份。
+5. 如果 %APPDATA%\codex-context-used-meter\provider-secrets.json 不存在，就从 examples\provider-secrets.blank.json 复制一份。
+6. 只在 %APPDATA%\codex-context-used-meter\provider-config.json 里填写非密钥配置：provider id、displayName、baseUrl、endpointPath、auth.accessTokenSecret、可选 userHeader.name、userHeader.valueSecret、refreshIntervalMs、quota.amountDivisor。
+7. 只在 %APPDATA%\codex-context-used-meter\provider-secrets.json 里填写真实 token 和真实用户 ID。
+8. 不要配置 server.host、server.port、providers[].type；这些字段已经废弃。
+9. 不要在聊天里回显 token、用户 ID、真实服务商地址或完整配置文件内容。
+10. 运行 .\tools\install-provider-supervisor.ps1，让 Provider helper 跟随 Codex 自动启动和停止。
+11. 用 node .\tools\provider-helper.js --once --no-cdp --print-summary 做一次验证，但输出前必须确认不会泄露 token 或用户 ID。
 ```
 
 ## 注意
@@ -175,6 +197,8 @@ Fill `provider-config.json` with:
 - `userHeader.name`: the provider's user ID header name; leave it empty if not needed.
 - `userHeader.valueSecret`: the key name used for the user ID in `provider-secrets.json`; leave it empty if not needed.
 
+You no longer need `server.host`, `server.port`, or `providers[].type`. Balance fetching does not use a local web server, and there is currently only one provider implementation.
+
 Only put private values in `provider-secrets.json`. Its keys must match `accessTokenSecret` / `valueSecret` from `provider-config.json`.
 
 Recommended: install the automatic supervisor:
@@ -228,6 +252,26 @@ Please install Codex Context Used Meter for me:
 6. Remind me to click "Reload user scripts" in Codex++, or restart Codex++.
 
 Do not modify the Codex App installation directory.
+```
+
+## Provider Setup Prompt
+
+Provider setup is separate from script installation. Script installation only shows Context usage; provider setup writes your provider endpoint, token, and user ID into private local config files. You can copy this separate prompt into a local agent:
+
+```text
+Please configure the Provider balance card for Codex Context Used Meter:
+
+1. Do not modify the Codex App installation directory, and do not write secrets into the Git repository.
+2. Confirm the repository path is my local codex-context-used-meter project directory.
+3. Create the private config directory: %APPDATA%\codex-context-used-meter
+4. If %APPDATA%\codex-context-used-meter\provider-config.json does not exist, copy it from examples\provider-config.blank.json.
+5. If %APPDATA%\codex-context-used-meter\provider-secrets.json does not exist, copy it from examples\provider-secrets.blank.json.
+6. Only write non-secret settings to %APPDATA%\codex-context-used-meter\provider-config.json: provider id, displayName, baseUrl, endpointPath, auth.accessTokenSecret, optional userHeader.name, userHeader.valueSecret, refreshIntervalMs, and quota.amountDivisor.
+7. Only write the real token and real user ID to %APPDATA%\codex-context-used-meter\provider-secrets.json.
+8. Do not configure server.host, server.port, or providers[].type; these fields are obsolete.
+9. Do not echo tokens, user IDs, real provider endpoints, or full config file contents back into chat.
+10. Run .\tools\install-provider-supervisor.ps1 so the Provider helper starts and stops with Codex.
+11. Run node .\tools\provider-helper.js --once --no-cdp --print-summary once to verify, but only after confirming the output will not expose tokens or user IDs.
 ```
 
 ## Notes
