@@ -34,7 +34,7 @@
 
 这样 token、用户 ID、服务商地址都留在本机私有配置里；Codex 渲染页只拿到已脱敏的余额、用量、状态和到期时间。
 
-复制空白配置到本机私有目录：
+复制配置模板到本机私有目录：
 
 ```powershell
 New-Item -ItemType Directory -Force "$env:APPDATA\codex-context-used-meter"; Copy-Item ".\config\provider-config.json" "$env:APPDATA\codex-context-used-meter\provider-config.json"; Copy-Item ".\config\provider-secrets.json" "$env:APPDATA\codex-context-used-meter\provider-secrets.json"; Copy-Item ".\config\ui-config.json" "$env:APPDATA\codex-context-used-meter\ui-config.json"

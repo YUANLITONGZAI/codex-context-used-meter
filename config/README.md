@@ -104,15 +104,86 @@ Copy them to the private local config directory first, then fill them there:
 New-Item -ItemType Directory -Force "$env:APPDATA\codex-context-used-meter"; Copy-Item ".\config\provider-config.json" "$env:APPDATA\codex-context-used-meter\provider-config.json"; Copy-Item ".\config\provider-secrets.json" "$env:APPDATA\codex-context-used-meter\provider-secrets.json"; Copy-Item ".\config\ui-config.json" "$env:APPDATA\codex-context-used-meter\ui-config.json"
 ```
 
+Runtime reads these files by default:
+
+```text
+%APPDATA%\codex-context-used-meter\provider-config.json
+%APPDATA%\codex-context-used-meter\provider-secrets.json
+%APPDATA%\codex-context-used-meter\ui-config.json
+```
+
 ## Files
 
 - `provider-config.json`: non-secret provider settings, such as provider name, API URL, endpoint path, secret key names, refresh interval, and quota conversion.
 - `provider-secrets.json`: local private token and user ID values only.
 - `ui-config.json`: Context and Provider balance color thresholds, plus the Context compaction warning zone.
 
-## Key Rules
+## provider-config.json
 
-- Keep real secrets only in `%APPDATA%\codex-context-used-meter\provider-secrets.json`.
-- `auth.accessTokenSecret` and `userHeader.valueSecret` are key names, not secret values.
-- `baseUrl` should be a public HTTPS API root, without tokens in the URL.
-- Color thresholds use remaining percent. Lower remaining percent means a more severe state.
+### `codex`
+
+Local Codex App connection settings. The helper uses the CDP debug port opened by Codex++ to push a sanitized Provider summary into the Codex page.
+
+| Field | Type | Required | Meaning |
+| --- | --- | --- | --- |
+| `debugPort` | number | No | Codex App CDP port. The default is `9229`; change it if Codex++ uses another port. |
+| `targetUrlHint` | string | No | Keyword used when selecting the CDP page target. Usually keep `codex`. |
+
+### `providers[]`
+
+Provider list. The UI currently shows the first valid active Provider.
+
+| Field | Type | Required | Meaning |
+| --- | --- | --- | --- |
+| `id` | string | Yes | Local unique ID. A short English name like `primary` is enough. Do not put secrets here. |
+| `displayName` | string | Yes | Provider name shown in the UI. A short provider nickname works well. |
+| `baseUrl` | string | Yes | Provider API root, such as `https://example.com`. It must be public HTTPS; do not use localhost, private network URLs, or URLs containing tokens. |
+| `endpointPath` | string | Yes | Subscription / balance endpoint path, such as `/api/subscription/self`. The helper joins it with `baseUrl`. |
+| `auth.type` | string | Yes | Auth type. Currently `bearer` is supported. |
+| `auth.accessTokenSecret` | string | Yes | Key name for the token in `provider-secrets.json`, not the real token. |
+| `userHeader.name` | string | No | Extra user ID header name if the provider requires one; leave it empty if not needed. |
+| `userHeader.valueSecret` | string | No | Key name for the user ID in `provider-secrets.json`, not the real user ID. |
+| `refreshIntervalMs` | number | No | Provider balance refresh interval in milliseconds. The template uses `10000`, meaning 10 seconds. |
+| `quota.amountDivisor` | number | Yes | Conversion factor from raw quota to displayed amount. Displayed amount = raw quota / `amountDivisor`. |
+
+The important part: `auth.accessTokenSecret` and `userHeader.valueSecret` are key-name mappings, not sensitive values. Real values only go in `provider-secrets.json`.
+
+## provider-secrets.json
+
+This file only stores local sensitive values. Its keys must match `auth.accessTokenSecret` / `userHeader.valueSecret` from `provider-config.json`.
+
+| Field | Type | Required | Meaning |
+| --- | --- | --- | --- |
+| `provider_access_token` | string | Depends on provider | Real access token. You may rename this template key, but then update `auth.accessTokenSecret` too. |
+| `provider_user_id` | string | Depends on provider | Real user ID or tenant ID. Leave it empty when the provider does not require an extra header. |
+
+Do not commit your local version of this file, paste it into issues, share it, or let an agent echo it back into chat.
+
+## ui-config.json
+
+UI config contains no secrets and can be tuned to your preference.
+
+### `context`
+
+Controls the Context card.
+
+| Field | Type | Required | Meaning |
+| --- | --- | --- | --- |
+| `compressionWarningLeftPercent` | number | No | Makes the left-side compaction warning zone more visible when remaining Context drops below this percent. Template default: `20`. |
+| `levelThresholds.noticeLeftPercent` | number | No | Enters notice color below this remaining percent. Template default: `60`. |
+| `levelThresholds.warnLeftPercent` | number | No | Enters warning color below this remaining percent. Template default: `50`. |
+| `levelThresholds.dangerLeftPercent` | number | No | Enters danger color below this remaining percent. Template default: `40`. |
+| `levelThresholds.criticalLeftPercent` | number | No | Enters critical color below this remaining percent. Template default: `30`. |
+
+### `provider`
+
+Controls the Provider balance card.
+
+| Field | Type | Required | Meaning |
+| --- | --- | --- | --- |
+| `levelThresholds.noticeLeftPercent` | number | No | Provider balance enters notice color below this remaining percent. Template default: `60`. |
+| `levelThresholds.warnLeftPercent` | number | No | Provider balance enters warning color below this remaining percent. Template default: `50`. |
+| `levelThresholds.dangerLeftPercent` | number | No | Provider balance enters danger color below this remaining percent. Template default: `40`. |
+| `levelThresholds.criticalLeftPercent` | number | No | Provider balance enters critical color below this remaining percent. Template default: `30`. |
+
+Thresholds are based on remaining percent. Lower remaining percent means a more severe state. For example, 38% remaining matches `dangerLeftPercent: 40`, and 28% remaining matches `criticalLeftPercent: 30`.
