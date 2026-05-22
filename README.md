@@ -53,13 +53,21 @@ New-Item -ItemType Directory -Force "$env:APPDATA\codex-context-used-meter"; Cop
 
 `provider-secrets.json` 只放本机私密值，字段名要和 `provider-config.json` 里的 `accessTokenSecret` / `valueSecret` 对上。
 
-启动 helper：
+推荐安装自动管理器：
 
 ```powershell
-node .\tools\provider-helper.js
+.\tools\install-provider-supervisor.ps1
 ```
 
-helper 需要能访问 Codex App 的 CDP 调试端口。通常 Codex++ 启动 Codex 后会自动打开这个端口；如果你的端口不是默认值，可以在 `provider-config.json` 里配置 `codex.debugPort`，或设置环境变量 `CCM_CODEX_DEBUG_PORT`。
+它会给当前 Windows 用户创建一个计划任务。登录后会自动启动一个很轻的 supervisor：Codex 打开时，它会启动 `provider-helper.js`；Codex 关闭后，它会停掉 helper。这样余额框会跟着 Codex 出现和消失，平时不需要手动开 helper。
+
+如果你只想临时测试，也可以手动跑一次 helper：
+
+```powershell
+node .\tools\provider-helper.js --once
+```
+
+supervisor / helper 需要能访问 Codex App 的 CDP 调试端口。通常 Codex++ 启动 Codex 后会自动打开这个端口；如果你的端口不是默认值，可以在 `provider-config.json` 里配置 `codex.debugPort`，或设置环境变量 `CCM_CODEX_DEBUG_PORT`。
 
 Provider 框显示的名字来自 `provider-config.json` 里的 `displayName`。比如你可以写成自己服务商的简称；公开仓库里的示例只放通用占位名。
 
@@ -74,6 +82,12 @@ node .\tools\provider-helper.js --once --no-cdp --print-summary
 ```
 
 注意：`provider-secrets.json` 不要提交到 Git，不要贴到 issue，不要发给别人。
+
+如果以后不想自动启动了：
+
+```powershell
+.\tools\uninstall-provider-supervisor.ps1
+```
 
 ## 让 Agent 自动安装
 
@@ -163,13 +177,21 @@ Fill `provider-config.json` with:
 
 Only put private values in `provider-secrets.json`. Its keys must match `accessTokenSecret` / `valueSecret` from `provider-config.json`.
 
-Start the helper:
+Recommended: install the automatic supervisor:
 
 ```powershell
-node .\tools\provider-helper.js
+.\tools\install-provider-supervisor.ps1
 ```
 
-The helper needs access to the Codex App CDP debug port. Codex++ normally opens it when launching Codex. If your port is not the default, set `codex.debugPort` in `provider-config.json`, or set `CCM_CODEX_DEBUG_PORT`.
+It creates a scheduled task for the current Windows user. After login, a lightweight supervisor starts automatically: when Codex is open, it starts `provider-helper.js`; when Codex exits, it stops the helper. The balance card then follows Codex without manual steps.
+
+For a one-off test, you can still run:
+
+```powershell
+node .\tools\provider-helper.js --once
+```
+
+The supervisor / helper needs access to the Codex App CDP debug port. Codex++ normally opens it when launching Codex. If your port is not the default, set `codex.debugPort` in `provider-config.json`, or set `CCM_CODEX_DEBUG_PORT`.
 
 The provider card name comes from `displayName` in `provider-config.json`. Use your own provider nickname there; the public example only uses a generic placeholder.
 
@@ -184,6 +206,12 @@ node .\tools\provider-helper.js --once --no-cdp --print-summary
 ```
 
 Do not commit `provider-secrets.json`, paste it into issues, or share it.
+
+To remove automatic startup later:
+
+```powershell
+.\tools\uninstall-provider-supervisor.ps1
+```
 
 ## Agent Install Prompt
 
