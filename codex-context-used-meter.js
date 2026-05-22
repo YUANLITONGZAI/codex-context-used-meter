@@ -8,7 +8,7 @@
   const CONFIG_KEY = "__codexContextMeterConfig";
   const PROVIDER_SUMMARY_KEY = "__codexContextMeterProviderSummary";
   const PROVIDER_SUMMARY_EVENT = "codex-context-meter-provider-summary";
-  const SCRIPT_VERSION = 44;
+  const SCRIPT_VERSION = 45;
   const UPDATE_INTERVAL_MS = 5000;
   const SLOW_SCAN_INTERVAL_MS = 30000;
   const SWITCH_RETRY_WINDOW_MS = 8000;
@@ -385,9 +385,13 @@
           opacity: 1;
           transform: translate(8px, -50%) scale(1);
         }
-        72% {
-          opacity: 1;
-          transform: translate(-128px, -50%) scale(1.82);
+        45% {
+          opacity: 0.92;
+          transform: translate(-92px, -50%) scale(1.56);
+        }
+        78% {
+          opacity: 0.28;
+          transform: translate(-144px, -50%) scale(1.92);
         }
         100% {
           opacity: 0;
@@ -404,9 +408,13 @@
           opacity: 1;
           transform: translate(-8px, -50%) scale(1);
         }
-        72% {
-          opacity: 1;
-          transform: translate(128px, -50%) scale(1.82);
+        45% {
+          opacity: 0.92;
+          transform: translate(92px, -50%) scale(1.56);
+        }
+        78% {
+          opacity: 0.28;
+          transform: translate(144px, -50%) scale(1.92);
         }
         100% {
           opacity: 0;
