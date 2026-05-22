@@ -18,7 +18,6 @@
     {
       "id": "primary",
       "displayName": "Example Provider",
-      "type": "newapi-subscription",
       "baseUrl": "https://example.com",
       "endpointPath": "/api/subscription/self",
       "auth": {
