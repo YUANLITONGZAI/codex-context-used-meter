@@ -9,7 +9,7 @@
   const UI_STATE_STORAGE_KEY = "__codexContextMeterUiState";
   const PROVIDER_SUMMARY_KEY = "__codexContextMeterProviderSummary";
   const PROVIDER_SUMMARY_EVENT = "codex-context-meter-provider-summary";
-  const SCRIPT_VERSION = 80;
+  const SCRIPT_VERSION = 81;
   const UPDATE_INTERVAL_MS = 5000;
   const SLOW_SCAN_INTERVAL_MS = 30000;
   const SWITCH_RETRY_WINDOW_MS = 8000;
@@ -31,9 +31,15 @@
   const MAX_CAPTURE_TEXT_LENGTH = 2000000;
   const SPEND_HISTORY_WINDOW_MS = 60 * 60 * 1000;
   const SPEND_HISTORY_MAX_ITEMS = 200;
-  const SPEND_HISTORY_VISIBLE_ROWS = 10;
+  const SPEND_HISTORY_CHART_WIDTH = 172;
+  const SPEND_HISTORY_CHART_HEIGHT = 54;
+  const SPEND_HISTORY_CHART_PADDING = 7;
   const SPEND_EFFECT_DURATION_MS = 3000;
   const SPEND_EFFECT_FALLBACK_MS = 3200;
+  const CONTEXT_SPEND_DEDUPE_WINDOW_MS = UPDATE_INTERVAL_MS * 2 + MUTATION_UPDATE_DELAY_MS;
+  const CONTEXT_SPEND_DEDUPE_KEY = "__codexContextMeterContextSpendDedupe";
+  const PROVIDER_SPEND_DEDUPE_WINDOW_MS = 1500;
+  const PROVIDER_SPEND_DEDUPE_KEY = "__codexContextMeterProviderSpendDedupe";
   const HISTORY_PANEL_CLOSE_DELAY_MS = 240;
   const FLOAT_DRAG_HOLD_MS = 260;
   const FLOAT_SCALE_MIN = 0.7;
@@ -270,6 +276,7 @@
         align-items: center;
         justify-content: center;
         gap: 8px;
+        min-height: var(--ccm-ring-size);
         max-width: calc(100vw - 32px);
         overflow: visible;
         pointer-events: auto;
@@ -557,6 +564,13 @@
 
       #${ROOT_ID} .ccm-history-section {
         min-width: 0;
+        --ccm-history-accent: #38bdf8;
+        --ccm-history-fill: rgba(56, 189, 248, 0.12);
+      }
+
+      #${ROOT_ID} .ccm-history-section[data-history-kind="provider"] {
+        --ccm-history-accent: #f97316;
+        --ccm-history-fill: rgba(249, 115, 22, 0.12);
       }
 
       #${ROOT_ID} .ccm-history-section[hidden] {
@@ -582,32 +596,59 @@
         font-variant-numeric: tabular-nums;
       }
 
-      #${ROOT_ID} .ccm-history-list {
-        display: grid;
-        gap: 4px;
+      #${ROOT_ID} .ccm-history-chart {
+        position: relative;
+        width: 100%;
+        min-height: 58px;
       }
 
-      #${ROOT_ID} .ccm-history-row {
-        display: grid;
-        grid-template-columns: 42px minmax(0, 1fr);
-        gap: 7px;
-        min-width: 0;
-        color: rgba(255, 255, 255, 0.82);
-        font-variant-numeric: tabular-nums;
+      #${ROOT_ID} .ccm-history-svg {
+        display: block;
+        width: 100%;
+        height: 58px;
+        overflow: visible;
       }
 
-      #${ROOT_ID} .ccm-history-time {
+      #${ROOT_ID} .ccm-history-gridline {
+        stroke: rgba(255, 255, 255, 0.1);
+        stroke-dasharray: 2 4;
+        stroke-width: 1;
+      }
+
+      #${ROOT_ID} .ccm-history-area {
+        fill: var(--ccm-history-fill);
+      }
+
+      #${ROOT_ID} .ccm-history-line {
+        fill: none;
+        stroke: var(--ccm-history-accent);
+        stroke-linecap: round;
+        stroke-linejoin: round;
+        stroke-width: 2.2;
+        vector-effect: non-scaling-stroke;
+      }
+
+      #${ROOT_ID} .ccm-history-point {
+        fill: #fff7ed;
+        stroke: var(--ccm-history-accent);
+        stroke-width: 1.5;
+      }
+
+      #${ROOT_ID} .ccm-history-caption {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        margin-top: 2px;
         color: rgba(255, 255, 255, 0.48);
-      }
-
-      #${ROOT_ID} .ccm-history-delta {
-        overflow: hidden;
-        text-align: right;
-        text-overflow: ellipsis;
+        font-size: 11px;
+        font-variant-numeric: tabular-nums;
         white-space: nowrap;
       }
 
       #${ROOT_ID} .ccm-history-empty {
+        position: absolute;
+        inset: 19px 0 auto 0;
         color: rgba(255, 255, 255, 0.46);
       }
 
@@ -662,6 +703,14 @@
         color: #86efac;
         font-weight: 800;
         text-align: center;
+      }
+
+      .ccm-context-menu .ccm-menu-hint {
+        padding: 5px 8px 6px 21px;
+        color: rgba(255, 255, 255, 0.48);
+        font-size: 11px;
+        line-height: 1.3;
+        white-space: nowrap;
       }
 
       #${ROOT_ID} .ccm-hit-pop {
@@ -778,14 +827,14 @@
               <span class="ccm-history-title">Context / Session</span>
               <span class="ccm-history-total">--</span>
             </div>
-            <div class="ccm-history-list"></div>
+            <div class="ccm-history-chart"></div>
           </div>
           <div class="ccm-history-section" data-history-kind="provider">
             <div class="ccm-history-head">
               <span class="ccm-history-title">Provider / Session</span>
               <span class="ccm-history-total">--</span>
             </div>
-            <div class="ccm-history-list"></div>
+            <div class="ccm-history-chart"></div>
           </div>
         </div>
       </div>
@@ -957,7 +1006,7 @@
   function mountRoot(root) {
     state.uiState = readUiState();
     if (state.uiState.mode === "floating") {
-      document.body.appendChild(root);
+      if (root.parentNode !== document.body) document.body.appendChild(root);
       state.inlineHost = null;
       root.dataset.placement = "floating";
       applyFloatingUiState(root);
@@ -968,15 +1017,18 @@
     if (!mount || !mount.parent || root.contains(mount.parent)) {
       state.inlineHost = null;
       state.inlineBefore = null;
-      document.body.appendChild(root);
+      if (root.parentNode !== document.body) document.body.appendChild(root);
       root.dataset.placement = "floating";
       applyFloatingUiState(root);
       return;
     }
 
-    mount.parent.insertBefore(root, mount.before || null);
+    const before = mount.before || null;
+    if (before !== root && (root.parentNode !== mount.parent || root.nextSibling !== before)) {
+      mount.parent.insertBefore(root, before);
+    }
     state.inlineHost = mount.parent;
-    state.inlineBefore = mount.before || null;
+    state.inlineBefore = before;
     root.dataset.placement = "inline";
   }
 
@@ -1060,10 +1112,14 @@
       const separator = document.createElement("div");
       separator.className = "ccm-menu-separator";
       separator.setAttribute("role", "separator");
+      const hint = document.createElement("div");
+      hint.className = "ccm-menu-hint";
+      hint.textContent = "Use mouse wheel to resize";
       items.push(
         separator,
         createRadioItem("floatingLayout", "horizontal", "Horizontal layout", currentFloatingLayout === "horizontal"),
         createRadioItem("floatingLayout", "vertical", "Vertical layout", currentFloatingLayout === "vertical"),
+        hint,
       );
     }
     menu.replaceChildren(...items);
@@ -1304,6 +1360,11 @@
     return String(Math.round(value));
   }
 
+  function formatTokenCount(value) {
+    if (!Number.isFinite(value)) return "--";
+    return Math.round(value).toLocaleString("en-US");
+  }
+
   function formatAmount(value) {
     if (!Number.isFinite(value)) return "--";
     if (Math.abs(value) >= 1000) return value.toLocaleString("en-US", { maximumFractionDigits: 1 });
@@ -1313,6 +1374,28 @@
   function formatMoney(value) {
     const amount = formatAmount(value);
     return amount === "--" ? amount : `$${amount}`;
+  }
+
+  function formatProviderTitle(name, provider, usedAmount, remainingAmount, totalAmount, usedPercent, leftPercent) {
+    return [
+      `${name} Balance`,
+      `Left: ${formatMoney(remainingAmount)} (${leftPercent.toFixed(1)}%)`,
+      `Used: ${formatMoney(usedAmount)} (${usedPercent.toFixed(1)}%)`,
+      `Total: ${formatMoney(totalAmount)}`,
+      `Status: ${provider.status || "unknown"}`,
+    ].join(" | ");
+  }
+
+  function formatContextTitle(reading, usedTokens, remainingTokens, leftPercent, usedPercent) {
+    const limitTokens = Number.isFinite(reading.limit) ? reading.limit : null;
+    const parts = [
+      "Context",
+      `Left: ${formatTokenCount(remainingTokens)} Tokens (${leftPercent.toFixed(1)}%)`,
+      `Used: ${formatTokenCount(usedTokens)} Tokens (${usedPercent.toFixed(1)}%)`,
+    ];
+    if (Number.isFinite(limitTokens)) parts.push(`Total: ${formatTokenCount(limitTokens)} Tokens`);
+    if (reading.source) parts.push(`Source: ${reading.source}`);
+    return parts.join(" | ");
   }
 
   function pruneSpendHistory(now = Date.now()) {
@@ -1359,6 +1442,95 @@
     return `-${Math.round(amount).toLocaleString("en-US")} Tokens`;
   }
 
+  function svgPoint(value) {
+    return Number.isFinite(value) ? value.toFixed(1) : "0.0";
+  }
+
+  function makeSpendHistoryChart(items, kind, total) {
+    const now = Date.now();
+    const cutoff = now - SPEND_HISTORY_WINDOW_MS;
+    const width = SPEND_HISTORY_CHART_WIDTH;
+    const height = SPEND_HISTORY_CHART_HEIGHT;
+    const padding = SPEND_HISTORY_CHART_PADDING;
+    const innerWidth = width - padding * 2;
+    const innerHeight = height - padding * 2;
+    const chart = document.createElement("div");
+    chart.className = "ccm-history-chart";
+
+    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    svg.setAttribute("class", "ccm-history-svg");
+    svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
+    svg.setAttribute("preserveAspectRatio", "none");
+    svg.setAttribute("aria-hidden", "true");
+
+    const gridline = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    gridline.setAttribute("class", "ccm-history-gridline");
+    gridline.setAttribute("d", `M ${padding} ${height - padding} H ${width - padding}`);
+    svg.appendChild(gridline);
+
+    const points = [];
+    let running = 0;
+    for (const item of items) {
+      if (!Number.isFinite(item.amount) || item.amount <= 0) continue;
+      running += item.amount;
+      const x = padding + ((Math.max(cutoff, Math.min(now, item.time)) - cutoff) / SPEND_HISTORY_WINDOW_MS) * innerWidth;
+      const y = height - padding - (running / Math.max(total, running, 1)) * innerHeight;
+      points.push({ x, y, total: running, item });
+    }
+
+    if (!points.length) {
+      const empty = document.createElement("div");
+      empty.className = "ccm-history-empty";
+      empty.textContent = "No spend in the last hour";
+      chart.append(svg, empty);
+      return chart;
+    }
+
+    if (points.length === 1) {
+      points.unshift({
+        x: padding,
+        y: height - padding,
+        total: 0,
+        item: { time: cutoff, amount: 0, meta: "" },
+      });
+    }
+
+    const linePath = points
+      .map((point, index) => `${index === 0 ? "M" : "L"} ${svgPoint(point.x)} ${svgPoint(point.y)}`)
+      .join(" ");
+    const areaPath = `${linePath} L ${svgPoint(points[points.length - 1].x)} ${height - padding} L ${svgPoint(points[0].x)} ${height - padding} Z`;
+
+    const area = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    area.setAttribute("class", "ccm-history-area");
+    area.setAttribute("d", areaPath);
+    svg.appendChild(area);
+
+    const line = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    line.setAttribute("class", "ccm-history-line");
+    line.setAttribute("d", linePath);
+    svg.appendChild(line);
+
+    const lastPoint = points[points.length - 1];
+    const point = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+    point.setAttribute("class", "ccm-history-point");
+    point.setAttribute("cx", svgPoint(lastPoint.x));
+    point.setAttribute("cy", svgPoint(lastPoint.y));
+    point.setAttribute("r", "3");
+    svg.appendChild(point);
+
+    const caption = document.createElement("div");
+    caption.className = "ccm-history-caption";
+    const windowLabel = document.createElement("span");
+    windowLabel.textContent = "Last hour";
+    const lastLabel = document.createElement("span");
+    lastLabel.textContent = `${formatHistoryTime(lastPoint.item.time)} ${formatHistoryDelta(kind, lastPoint.item.amount)}`;
+    if (lastPoint.item.meta) lastLabel.title = String(lastPoint.item.meta);
+    caption.append(windowLabel, lastLabel);
+
+    chart.append(svg, caption);
+    return chart;
+  }
+
   function renderHistorySection(kind) {
     const panel = state.historyPanel;
     const section = panel && panel.querySelector(`[data-history-kind="${kind}"]`);
@@ -1378,32 +1550,11 @@
         ? contextSessionTotal(metaConversationId())
         : state.sessionSpendTotals[kind] || 0;
     const totalNode = section.querySelector(".ccm-history-total");
-    const list = section.querySelector(".ccm-history-list");
+    const chart = section.querySelector(".ccm-history-chart");
     if (totalNode) totalNode.textContent = total > 0 ? formatHistoryDelta(kind, total) : "--";
-    if (!list) return;
+    if (!chart) return;
 
-    if (!items.length) {
-      list.innerHTML = `<div class="ccm-history-empty">No spend in the last hour</div>`;
-      return;
-    }
-
-    const recent = items.slice(-SPEND_HISTORY_VISIBLE_ROWS).reverse();
-    list.replaceChildren(...recent.map((item) => {
-      const row = document.createElement("div");
-      row.className = "ccm-history-row";
-
-      const time = document.createElement("span");
-      time.className = "ccm-history-time";
-      time.textContent = formatHistoryTime(item.time);
-
-      const delta = document.createElement("span");
-      delta.className = "ccm-history-delta";
-      delta.textContent = formatHistoryDelta(kind, item.amount);
-      if (item.meta) delta.title = String(item.meta);
-
-      row.append(time, delta);
-      return row;
-    }));
+    chart.replaceWith(makeSpendHistoryChart(items, kind, total));
   }
 
   function metaConversationId() {
@@ -1548,6 +1699,10 @@
     root?.querySelectorAll(".ccm-hit-pop").forEach((node) => node.remove());
   }
 
+  function hasPendingSpendEffects() {
+    return !!(state.spendEffectActive || state.spendEffectQueue.length);
+  }
+
   function finishSpendEffect(pop) {
     if (state.spendEffectActive !== pop) return;
     window.clearTimeout(state.spendEffectTimer);
@@ -1555,6 +1710,10 @@
     state.spendEffectActive = null;
     pop.remove();
     playNextSpendEffect();
+    if (!hasPendingSpendEffects()) {
+      const root = state.root || document.getElementById(ROOT_ID);
+      if (root) updateDockVisibility(root);
+    }
   }
 
   function playNextSpendEffect() {
@@ -1571,7 +1730,12 @@
     state.spendEffectActive = pop;
     root.appendChild(pop);
 
-    pop.addEventListener("animationend", () => finishSpendEffect(pop), { once: true });
+    const onAnimationEnd = (event) => {
+      if (event.target !== pop || event.animationName !== "ccm-hit-pop") return;
+      pop.removeEventListener("animationend", onAnimationEnd);
+      finishSpendEffect(pop);
+    };
+    pop.addEventListener("animationend", onAnimationEnd);
     state.spendEffectTimer = window.setTimeout(() => finishSpendEffect(pop), SPEND_EFFECT_FALLBACK_MS);
   }
 
@@ -1589,6 +1753,43 @@
   function showProviderSpendEffect(deltaAmount) {
     if (!Number.isFinite(deltaAmount) || deltaAmount <= 0) return;
     enqueueSpendEffect(`-${formatMoney(deltaAmount)}`);
+  }
+
+  function shouldShowContextSpendEffect(conversationId, currentUsed) {
+    if (!Number.isFinite(currentUsed)) return false;
+    const now = Date.now();
+    const normalizedConversationId = normalizeConversationId(conversationId || "__unknown__") || "__unknown__";
+    const roundedCurrentUsed = Math.round(currentUsed);
+    const previous = window[CONTEXT_SPEND_DEDUPE_KEY];
+    const isSameReading =
+      previous &&
+      previous.currentUsed === roundedCurrentUsed &&
+      (
+        previous.conversationId === normalizedConversationId ||
+        previous.conversationId === "__unknown__" ||
+        normalizedConversationId === "__unknown__"
+      );
+    if (isSameReading && now - previous.at < CONTEXT_SPEND_DEDUPE_WINDOW_MS) {
+      return false;
+    }
+    window[CONTEXT_SPEND_DEDUPE_KEY] = {
+      conversationId: normalizedConversationId,
+      currentUsed: roundedCurrentUsed,
+      at: now,
+    };
+    return true;
+  }
+
+  function shouldShowProviderSpendEffect(providerId, currentUsed) {
+    if (!providerId || !Number.isFinite(currentUsed)) return false;
+    const now = Date.now();
+    const key = `${providerId}:${currentUsed}`;
+    const previous = window[PROVIDER_SPEND_DEDUPE_KEY];
+    if (previous && previous.key === key && now - previous.at < PROVIDER_SPEND_DEDUPE_WINDOW_MS) {
+      return false;
+    }
+    window[PROVIDER_SPEND_DEDUPE_KEY] = { key, at: now };
+    return true;
   }
 
   function hasDescendant(element, selector) {
@@ -1628,14 +1829,15 @@
     const contextVisible = state.contextCard && !state.contextCard.hidden;
     const providerVisible = state.providerCard && !state.providerCard.hidden;
     const hidden = !contextVisible && !providerVisible;
-    root.hidden = hidden;
+    const keepVisibleForSpend = hidden && hasPendingSpendEffects();
+    root.hidden = hidden && !keepVisibleForSpend;
     if (hidden) {
       closeSpendHistory();
-      clearSpendEffects();
+      if (!keepVisibleForSpend) clearSpendEffects();
     } else if (root.dataset.historyOpen === "true") {
       renderSpendHistory();
     }
-    if (!hidden) playNextSpendEffect();
+    if (!root.hidden) playNextSpendEffect();
   }
 
   function hideMeter(root, card, value, fill, title) {
@@ -1698,7 +1900,7 @@
     const name = String(provider.displayName || provider.id || "Provider").slice(0, 48);
     const text = `${name} Left ${leftPercent.toFixed(1)}% ${formatMoney(usedAmount)} / ${formatMoney(totalAmount)}`;
     const width = `${leftPercent.toFixed(1)}%`;
-    const title = `Provider: ${name} | Status: ${provider.status}`;
+    const title = formatProviderTitle(name, provider, usedAmount, remainingAmount, totalAmount, usedPercent, leftPercent);
     const providerId = String(provider.id || name || "__provider__");
     const currentUsed = Number(provider.used);
 
@@ -1706,8 +1908,10 @@
       const previousUsed = state.lastAnimatedProviderUsedById.get(providerId);
       if (Number.isFinite(previousUsed) && currentUsed > previousUsed && Number.isFinite(provider.total) && provider.total > 0) {
         const deltaAmount = (currentUsed - previousUsed) * (totalAmount / Number(provider.total));
-        recordSpend("provider", deltaAmount, providerId);
-        showProviderSpendEffect(deltaAmount);
+        if (shouldShowProviderSpendEffect(providerId, currentUsed)) {
+          recordSpend("provider", deltaAmount, providerId);
+          showProviderSpendEffect(deltaAmount);
+        }
       }
       state.lastAnimatedProviderUsedById.set(providerId, currentUsed);
     }
@@ -3390,16 +3594,18 @@
       const previousUsed = state.lastAnimatedUsedByConversationId.get(readingConversationId);
       if (Number.isFinite(previousUsed) && reading.used > previousUsed) {
         const deltaTokens = reading.used - previousUsed;
-        recordSpend("context", deltaTokens, readingConversationId);
-        showTokenSpendEffect(deltaTokens);
+        if (shouldShowContextSpendEffect(readingConversationId, reading.used)) {
+          recordSpend("context", deltaTokens, readingConversationId);
+          showTokenSpendEffect(deltaTokens);
+        }
       }
       state.lastAnimatedUsedByConversationId.set(readingConversationId, reading.used);
     }
 
     const level = levelForLeftPercent(leftPercent, "context");
     const compressionWarning = shouldShowCompressionWarning(leftPercent) ? "true" : "false";
-    const title = `Source: ${reading.source}${reading.raw ? ` | ${reading.raw}` : ""}`;
     const remainingTokens = reading.used != null && reading.limit != null ? Math.max(0, reading.limit - reading.used) : null;
+    const title = formatContextTitle(reading, reading.used, remainingTokens, leftPercent, reading.percent);
     const text = showUsedInsteadOfLeft
       ? `Context Used ${percentText}%${details}`
       : Number.isFinite(remainingTokens)

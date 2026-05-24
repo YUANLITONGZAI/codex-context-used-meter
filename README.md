@@ -13,12 +13,13 @@
 - 显示 `Context Left xx.x%`，默认表达「还剩多少上下文」。
 - 可通过 `ui-config.json` 把 Context 显示切换为 `Context Used xx.x%`。
 - Context 条左侧的黄 / 橙斜线表示接近压缩点的区域。
-- 可选显示 Provider 余额框，例如订阅额度、已用金额、剩余额度。
+- 可选显示 Provider 余额框，例如订阅额度、已用金额、剩余额度；未配置 Provider 时只显示 Context，其它功能不受影响。
 - 新消耗 token 或 Provider 余额变化时，从整个组件最左侧中间外侧播放统一的扣血动画。
 - token 扣血和 Provider 扣血共用队列，不会同时重叠显示。
-- 鼠标悬停在组件附近时显示本次会话的 Context / Provider 消耗历史。
+- 鼠标悬停在 Context / Provider 面板上时，系统悬浮提示显示当前真实数值。
+- 鼠标悬停在组件附近时显示本次会话近一小时累计消耗折线图，Context / Provider 独立统计。
 - 右键组件可在 inline / floating 模式之间切换。
-- floating 模式支持左右排列和上下排列，并支持拖动位置与滚轮缩放。
+- floating 模式支持左右排列和上下排列，并支持拖动位置与滚轮缩放；floating 右键菜单会提示可用鼠标滚轮缩放。
 
 ## 安装脚本
 
@@ -41,6 +42,7 @@ Copy-Item ".\codex-context-used-meter.js" "$env:APPDATA\Codex++\user_scripts\cod
 - `Floating mode`：改为悬浮显示。
 - `Horizontal layout`：floating 模式下左右排列 Context 和 Provider。
 - `Vertical layout`：floating 模式下上下排列 Context 和 Provider。
+- `Use mouse wheel to resize`：floating 模式下显示的提示项，提醒可用鼠标滚轮缩放。
 
 floating 模式下：
 
@@ -99,7 +101,7 @@ Copy-Item ".\config\ui-config.json" "$env:APPDATA\codex-context-used-meter\ui-co
 
 ## Provider 余额框
 
-Provider 余额框是可选功能。用户脚本不直接请求服务商 API，不读取本机密钥文件。数据流是：
+Provider 余额框是可选功能。如果不需要 Provider 余额功能，可以不创建 Provider 配置；组件会只显示 Context，属于正常状态。用户脚本不直接请求服务商 API，不读取本机密钥文件。数据流是：
 
 1. `tools/provider-helper.js` 在本机 Node.js 进程里读取私有配置。
 2. helper 请求服务商订阅 / 余额接口。
@@ -181,9 +183,10 @@ Context 不显示：
 
 Provider 不显示：
 
-- 确认 `provider-helper.js` 或 supervisor 正在运行。
-- 确认 `provider-config.json` 和 `provider-secrets.json` 在 `%APPDATA%\codex-context-used-meter`。
-- 确认 `codex.debugPort` 与 Codex++ 实际 CDP 端口一致。
+- 如果没有配置 Provider 余额功能，这是预期行为；只使用 Context 时无需处理。
+- 如果需要 Provider 余额，确认 `provider-helper.js` 或 supervisor 正在运行。
+- 如果需要 Provider 余额，确认 `provider-config.json` 和 `provider-secrets.json` 在 `%APPDATA%\codex-context-used-meter`。
+- 如果需要 Provider 余额，确认 `codex.debugPort` 与 Codex++ 实际 CDP 端口一致。
 - 用 `node .\tools\provider-helper.js --once --no-cdp --print-summary` 验证 Provider 解析。
 
 扣血动画重叠：
@@ -253,12 +256,13 @@ The user script only reads runtime signals already exposed in the Codex renderer
 - Shows `Context Left xx.x%` by default.
 - Can show `Context Used xx.x%` instead via `ui-config.json`.
 - Shows a striped warning zone on the left side of the Context bar when the conversation is close to compaction.
-- Optionally shows a Provider balance card with used, total, remaining, and status data.
+- Optionally shows a Provider balance card with used, total, remaining, and status data; when Provider is not configured, only Context is shown and the rest of the meter still works.
 - Plays spend pop text from the whole component's left-middle outside edge.
 - Context token spend and Provider spend share one queue, so the pop text does not overlap.
-- Shows per-session Context / Provider spend history while hovering near the component.
+- Shows live current values in the native tooltip when hovering over the Context / Provider panels.
+- Shows a one-hour cumulative spend line chart while hovering near the component, with separate Context and Provider series.
 - Right-click menu switches between inline and floating modes.
-- Floating mode supports horizontal / vertical layout, drag position, and wheel zoom.
+- Floating mode supports horizontal / vertical layout, drag position, and wheel zoom; the floating right-click menu includes a mouse-wheel resize hint.
 
 ## Install Script
 
@@ -281,6 +285,7 @@ Right-click the component to open the menu:
 - `Floating mode`: show as a floating overlay.
 - `Horizontal layout`: arrange Context and Provider side by side in floating mode.
 - `Vertical layout`: stack Context and Provider in floating mode.
+- `Use mouse wheel to resize`: hint shown in floating mode to remind users that the mouse wheel resizes the overlay.
 
 In floating mode:
 
@@ -339,7 +344,7 @@ Thresholds are based on remaining percentage. By default, 60% remaining enters n
 
 ## Provider Balance Card
 
-The Provider balance card is optional. The user script does not call provider APIs and does not read local secret files. Data flow:
+The Provider balance card is optional. If you do not need Provider balance data, leave Provider config absent; the component will show Context only, which is expected. The user script does not call provider APIs and does not read local secret files. Data flow:
 
 1. `tools/provider-helper.js` reads private local config in a local Node.js process.
 2. The helper calls the provider subscription / balance endpoint.
@@ -421,9 +426,10 @@ Context card is missing:
 
 Provider card is missing:
 
-- Make sure `provider-helper.js` or the supervisor is running.
-- Make sure `provider-config.json` and `provider-secrets.json` exist under `%APPDATA%\codex-context-used-meter`.
-- Make sure `codex.debugPort` matches the actual Codex++ CDP port.
+- If Provider balance is not configured, this is expected; no action is needed when you only use Context.
+- If you want Provider balance, make sure `provider-helper.js` or the supervisor is running.
+- If you want Provider balance, make sure `provider-config.json` and `provider-secrets.json` exist under `%APPDATA%\codex-context-used-meter`.
+- If you want Provider balance, make sure `codex.debugPort` matches the actual Codex++ CDP port.
 - Run `node .\tools\provider-helper.js --once --no-cdp --print-summary` to validate provider parsing.
 
 Spend pop text overlaps:
