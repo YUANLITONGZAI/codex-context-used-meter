@@ -35,3 +35,4 @@ Copy-Item -LiteralPath .\codex-context-used-meter.js -Destination (Join-Path $en
 - 保持仓库内源码与 `%APPDATA%\Codex++\user_scripts` 下的实际生效脚本同步。
 - 不要在可提交文件中硬编码本机用户目录绝对路径。
 - 修改后至少确认目标脚本已复制到用户脚本目录，再验证 Codex++ 中的实际效果。
+- push 到远端前必须检查本次提交内容是否包含隐私数据或本机敏感信息，例如真实用户目录、Token、密钥、邮箱、私网地址、带凭据的 URL。

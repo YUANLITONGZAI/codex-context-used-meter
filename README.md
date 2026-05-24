@@ -8,6 +8,12 @@
 
 ![Codex Context Used Meter 效果展示](assets/codex-context-meter-demo.gif)
 
+![悬浮状态栏显示 Context 与 Provider 余量](assets/floating-status-bar.png)
+
+![右键菜单切换 inline / floating 与横向 / 纵向布局](assets/floating-layout-menu.png)
+
+![当前会话的 Context / Provider 单次消耗历史图](assets/session-spend-history.png)
+
 ## 功能
 
 - 显示 `Context Left xx.x%`，默认表达「还剩多少上下文」。
@@ -17,7 +23,7 @@
 - 新消耗 token 或 Provider 余额变化时，从整个组件最左侧中间外侧播放统一的扣血动画。
 - token 扣血和 Provider 扣血共用队列，不会同时重叠显示。
 - 鼠标悬停在 Context / Provider 面板上时，系统悬浮提示显示当前真实数值。
-- 鼠标悬停在组件附近时显示本次会话近一小时累计消耗折线图，Context / Provider 独立统计。
+- 鼠标悬停在组件附近时显示当前会话近一小时消耗折线图，Context / Provider 独立统计；图表点值是每次单独消耗，标题栏右侧显示当前会话累计值。
 - 右键组件可在 inline / floating 模式之间切换。
 - floating 模式支持左右排列和上下排列，并支持拖动位置与滚轮缩放；floating 右键菜单会提示可用鼠标滚轮缩放。
 
@@ -251,6 +257,12 @@ The user script only reads runtime signals already exposed in the Codex renderer
 
 ![Codex Context Used Meter demo](assets/codex-context-meter-demo.gif)
 
+![Floating status bar showing Context and Provider balance](assets/floating-status-bar.png)
+
+![Right-click menu for inline / floating and horizontal / vertical layout](assets/floating-layout-menu.png)
+
+![Current-session Context / Provider per-spend history charts](assets/session-spend-history.png)
+
 ## Features
 
 - Shows `Context Left xx.x%` by default.
@@ -260,7 +272,7 @@ The user script only reads runtime signals already exposed in the Codex renderer
 - Plays spend pop text from the whole component's left-middle outside edge.
 - Context token spend and Provider spend share one queue, so the pop text does not overlap.
 - Shows live current values in the native tooltip when hovering over the Context / Provider panels.
-- Shows a one-hour cumulative spend line chart while hovering near the component, with separate Context and Provider series.
+- Shows current-session one-hour spend line charts while hovering near the component, with separate Context and Provider series; chart points are individual spend events, and the header keeps the current-session cumulative total.
 - Right-click menu switches between inline and floating modes.
 - Floating mode supports horizontal / vertical layout, drag position, and wheel zoom; the floating right-click menu includes a mouse-wheel resize hint.
 

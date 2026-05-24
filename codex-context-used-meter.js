@@ -196,10 +196,8 @@
     spendEffectQueue: [],
     spendEffectActive: null,
     spendEffectTimer: 0,
-    sessionSpendTotals: {
-      provider: 0,
-    },
     contextSessionTotalsByConversationId: new Map(),
+    providerSessionTotalsByConversationId: new Map(),
     historyCloseTimer: 0,
     historyHoverCleanup: null,
     uiConfig: DEFAULT_UI_CONFIG,
@@ -1433,18 +1431,24 @@
     if (!Number.isFinite(amount) || amount <= 0 || !state.spendHistory[kind]) return;
 
     const now = Date.now();
+    const conversationId =
+      kind === "context"
+        ? normalizeConversationId(meta || state.activeConversationId || "__unknown__") || "__unknown__"
+        : metaConversationId();
+    const itemMeta = kind === "provider" ? String(meta || "") : "";
     if (kind === "context") {
-      const conversationId = normalizeConversationId(meta || state.activeConversationId || "__unknown__") || "__unknown__";
       const previousTotal = state.contextSessionTotalsByConversationId.get(conversationId) || 0;
       state.contextSessionTotalsByConversationId.set(conversationId, previousTotal + amount);
     } else {
-      state.sessionSpendTotals[kind] = (state.sessionSpendTotals[kind] || 0) + amount;
+      const previousTotal = state.providerSessionTotalsByConversationId.get(conversationId) || 0;
+      state.providerSessionTotalsByConversationId.set(conversationId, previousTotal + amount);
     }
 
     state.spendHistory[kind].push({
       time: now,
       amount,
-      meta: meta || "",
+      conversationId,
+      meta: itemMeta,
     });
     pruneSpendHistory(now);
     if (state.root && state.root.dataset.historyOpen === "true") {
@@ -1473,7 +1477,6 @@
   function formatHistoryPointTitle(kind, point) {
     const lines = [
       `${formatHistoryTime(point.item.time)} ${formatHistoryDelta(kind, point.item.amount)}`,
-      `Total: ${kind === "provider" ? formatMoney(point.total) : `${formatTokenCount(point.total)} Tokens`}`,
     ];
     if (point.item.meta) lines.push(String(point.item.meta));
     return lines.join("\n");
@@ -1483,7 +1486,7 @@
     return Number.isFinite(value) ? value.toFixed(1) : "0.0";
   }
 
-  function makeSpendHistoryChart(items, kind, total) {
+  function makeSpendHistoryChart(items, kind) {
     const now = Date.now();
     const cutoff = now - SPEND_HISTORY_WINDOW_MS;
     const width = SPEND_HISTORY_CHART_WIDTH;
@@ -1533,26 +1536,24 @@
       ? formatHistoryTime(firstTime)
       : `${formatHistoryTime(firstTime)}-${formatHistoryTime(lastTime)}`;
     const rawPoints = [];
-    let running = 0;
     validItems.forEach((item, index) => {
-      running += item.amount;
       const xRatio = useIndexAxis
         ? index / Math.max(validItems.length - 1, 1)
         : (item.time - firstTime) / timeSpan;
       const x = plotLeft + xRatio * innerWidth;
-      rawPoints.push({ x, total: running, item });
+      rawPoints.push({ x, value: item.amount, item });
     });
 
-    const minTotal = Math.min(...rawPoints.map((point) => point.total));
-    const maxTotal = Math.max(...rawPoints.map((point) => point.total));
-    const valueRange = Math.max(maxTotal - minTotal, Math.max(maxTotal, 1) * 0.12, 1);
-    const axisMin = Math.max(0, minTotal - valueRange * 0.08);
-    const axisMax = maxTotal + valueRange * 0.08;
+    const minValue = Math.min(...rawPoints.map((point) => point.value));
+    const maxValue = Math.max(...rawPoints.map((point) => point.value));
+    const fallbackRange = Math.max(maxValue, 1) * 0.12;
+    const axisMin = minValue === maxValue ? Math.max(0, minValue - fallbackRange) : minValue;
+    const axisMax = minValue === maxValue ? maxValue + fallbackRange : maxValue;
     const axisRange = Math.max(axisMax - axisMin, 1);
-    const yForTotal = (value) => plotBottom - ((value - axisMin) / axisRange) * innerHeight;
+    const yForValue = (value) => plotBottom - ((value - axisMin) / axisRange) * innerHeight;
     const points = rawPoints.map((point) => ({
       ...point,
-      y: yForTotal(point.total),
+      y: yForValue(point.value),
     }));
 
     if (points.length === 1) {
@@ -1560,7 +1561,7 @@
       points.push({
         x: plotRight,
         y: onlyPoint.y,
-        total: onlyPoint.total,
+        value: onlyPoint.value,
         item: onlyPoint.item,
         isSynthetic: true,
       });
@@ -1661,17 +1662,21 @@
     if (section.hidden) section.hidden = false;
 
     pruneSpendHistory();
-    const items = state.spendHistory[kind];
+    const conversationId = metaConversationId();
+    const items = state.spendHistory[kind].filter((item) => {
+      const itemConversationId = normalizeConversationId(item.conversationId || "__unknown__") || "__unknown__";
+      return itemConversationId === conversationId;
+    });
     const total =
       kind === "context"
-        ? contextSessionTotal(metaConversationId())
-        : state.sessionSpendTotals[kind] || 0;
+        ? contextSessionTotal(conversationId)
+        : providerSessionTotal(conversationId);
     const totalNode = section.querySelector(".ccm-history-total");
     const chart = section.querySelector(".ccm-history-chart");
     if (totalNode) totalNode.textContent = total > 0 ? formatHistoryDelta(kind, total) : "--";
     if (!chart) return;
 
-    chart.replaceWith(makeSpendHistoryChart(items, kind, total));
+    chart.replaceWith(makeSpendHistoryChart(items, kind));
   }
 
   function metaConversationId() {
@@ -1681,6 +1686,11 @@
   function contextSessionTotal(conversationId) {
     const normalizedConversationId = normalizeConversationId(conversationId || "__unknown__") || "__unknown__";
     return state.contextSessionTotalsByConversationId.get(normalizedConversationId) || 0;
+  }
+
+  function providerSessionTotal(conversationId) {
+    const normalizedConversationId = normalizeConversationId(conversationId || "__unknown__") || "__unknown__";
+    return state.providerSessionTotalsByConversationId.get(normalizedConversationId) || 0;
   }
 
   function renderSpendHistory() {
@@ -2015,7 +2025,7 @@
     const leftPercent = clampPercent(100 - usedPercent);
     const level = levelForLeftPercent(leftPercent, "provider");
     const name = String(provider.displayName || provider.id || "Provider").slice(0, 48);
-    const text = `${name} Left ${leftPercent.toFixed(1)}% ${formatMoney(usedAmount)} / ${formatMoney(totalAmount)}`;
+    const text = `${name} Left ${leftPercent.toFixed(1)}% (${formatMoney(remainingAmount)} left)`;
     const width = `${leftPercent.toFixed(1)}%`;
     const title = formatProviderTitle(name, provider, usedAmount, remainingAmount, totalAmount, usedPercent, leftPercent);
     const providerId = String(provider.id || name || "__provider__");
