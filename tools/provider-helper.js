@@ -19,8 +19,9 @@ const DEFAULT_PROVIDER_REFRESH_INTERVAL_MS = 10000;
 const PROVIDER_SUMMARY_KEY = "__codexContextMeterProviderSummary";
 const PROVIDER_SUMMARY_EVENT = "codex-context-meter-provider-summary";
 
-const DEFAULT_UI_CONFIG = {
-  context: {
+  const DEFAULT_UI_CONFIG = {
+    context: {
+    showUsedInsteadOfLeft: false,
     compressionWarningLeftPercent: 20,
     levelThresholds: {
       criticalLeftPercent: 30,
@@ -275,6 +276,7 @@ function normalizeUiConfig(ui) {
 
   return {
     context: {
+      showUsedInsteadOfLeft: context.showUsedInsteadOfLeft === true,
       compressionWarningLeftPercent: clampPercent(numberOrDefault(
         context.compressionWarningLeftPercent,
         DEFAULT_UI_CONFIG.context.compressionWarningLeftPercent,

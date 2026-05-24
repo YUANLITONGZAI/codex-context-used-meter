@@ -1,46 +1,113 @@
 # Codex Context Used Meter
 
-一个给 [BigPizzaV3/CodexPlusPlus](https://github.com/BigPizzaV3/CodexPlusPlus) 写的 Codex++ 用户脚本。
+一个给 Codex App / Codex++ 使用的轻量用户脚本，用来在对话界面显示当前会话的上下文余量，并可选显示服务提供商余额。
 
-它会在 Codex App 对话界面顶部显示当前会话还剩多少上下文，并用一个小条形图展示。新消耗 token 时，会从右往左弹出一个轻量的“扣血”数字特效。
+脚本本身只读取 Codex 渲染页里已经暴露的运行态信号。Provider 余额由本机 helper 读取本地私有配置后获取，再把脱敏 summary 写入页面；真实 token、用户 ID、服务商地址和原始响应不进入渲染页，也不应该提交到仓库。
 
 ## 效果展示
 
 ![Codex Context Used Meter 效果展示](assets/codex-context-meter-demo.gif)
 
-[查看 MP4 高清演示](assets/codex-context-meter-demo.mp4)
+## 功能
 
-## 这是干什么的
+- 显示 `Context Left xx.x%`，默认表达「还剩多少上下文」。
+- 可通过 `ui-config.json` 把 Context 显示切换为 `Context Used xx.x%`。
+- Context 条左侧的黄 / 橙斜线表示接近压缩点的区域。
+- 可选显示 Provider 余额框，例如订阅额度、已用金额、剩余额度。
+- 新消耗 token 或 Provider 余额变化时，从整个组件最左侧中间外侧播放统一的扣血动画。
+- token 扣血和 Provider 扣血共用队列，不会同时重叠显示。
+- 鼠标悬停在组件附近时显示本次会话的 Context / Provider 消耗历史。
+- 右键组件可在 inline / floating 模式之间切换。
+- floating 模式支持左右排列和上下排列，并支持拖动位置与滚轮缩放。
 
-- 显示 `Context Left xx.x%`。
-- 显示已用 / 总上下文 token 数。
-- 尽量按当前打开的会话读取，不固定到其他会话。
-- 没读到有效上下文信息时自动隐藏，不占界面。
-- 只在 Codex 对话窗口显示，不在 Codex++ 其他页面乱显示。
+## 安装脚本
 
-## 安装
-
-把 `codex-context-used-meter.js` 放到 Codex++ 的用户脚本目录：
-
-```text
-%APPDATA%\Codex++\user_scripts\codex-context-used-meter.js
-```
-
-然后在 Codex++ 管理工具里点击重新加载用户脚本，或者重启 Codex++。
-
-## 可选：Provider 余额框
-
-脚本支持在 Context 框旁边显示一个并列的 Provider 余额框。余额数据不由用户脚本直接请求服务商，而是由本机 helper 读取私有配置后直接请求服务商，再通过 Codex++ 打开的 CDP 调试端口把脱敏 summary 写进 Codex 页面。
-
-这样 token、用户 ID、服务商地址都留在本机私有配置里；Codex 渲染页只拿到已脱敏的余额、用量、状态和到期时间。
-
-复制配置模板到本机私有目录：
+把 `codex-context-used-meter.js` 复制到 Codex++ 用户脚本目录：
 
 ```powershell
-New-Item -ItemType Directory -Force "$env:APPDATA\codex-context-used-meter"; Copy-Item ".\config\provider-config.json" "$env:APPDATA\codex-context-used-meter\provider-config.json"; Copy-Item ".\config\provider-secrets.json" "$env:APPDATA\codex-context-used-meter\provider-secrets.json"; Copy-Item ".\config\ui-config.json" "$env:APPDATA\codex-context-used-meter\ui-config.json"
+New-Item -ItemType Directory -Force "$env:APPDATA\Codex++\user_scripts"
+Copy-Item ".\codex-context-used-meter.js" "$env:APPDATA\Codex++\user_scripts\codex-context-used-meter.js" -Force
 ```
 
-然后编辑这些本机文件：
+重启 Codex++ / Codex App，或让 Codex++ 重新注入用户脚本。
+
+## UI 交互
+
+默认是 inline 模式：组件会尽量挂到 Codex 顶部工具栏里，位于模型提供商 / 模型选择控件左侧区域。
+
+右键组件打开菜单：
+
+- `Inline mode`：回到工具栏内显示。
+- `Floating mode`：改为悬浮显示。
+- `Horizontal layout`：floating 模式下左右排列 Context 和 Provider。
+- `Vertical layout`：floating 模式下上下排列 Context 和 Provider。
+
+floating 模式下：
+
+- 按住组件短暂停留后拖动，可以移动位置。
+- 鼠标滚轮可以缩放组件。
+- 模式、布局、位置和缩放保存在浏览器本地 `localStorage`，不写入 JSON 配置文件。
+
+## UI 配置
+
+UI 配置模板在 [config/ui-config.json](config/ui-config.json)。运行时配置建议放在：
+
+```text
+%APPDATA%\codex-context-used-meter\ui-config.json
+```
+
+首次配置可复制模板：
+
+```powershell
+New-Item -ItemType Directory -Force "$env:APPDATA\codex-context-used-meter"
+Copy-Item ".\config\ui-config.json" "$env:APPDATA\codex-context-used-meter\ui-config.json" -Force
+```
+
+当前可配置项：
+
+```json
+{
+  "context": {
+    "showUsedInsteadOfLeft": false,
+    "compressionWarningLeftPercent": 20,
+    "levelThresholds": {
+      "criticalLeftPercent": 30,
+      "dangerLeftPercent": 40,
+      "warnLeftPercent": 50,
+      "noticeLeftPercent": 60
+    }
+  },
+  "provider": {
+    "levelThresholds": {
+      "criticalLeftPercent": 30,
+      "dangerLeftPercent": 40,
+      "warnLeftPercent": 50,
+      "noticeLeftPercent": 60
+    }
+  }
+}
+```
+
+说明：
+
+- `context.showUsedInsteadOfLeft`：`false` 显示 `Context Left`；`true` 显示 `Context Used`。默认是 `false`。
+- `context.compressionWarningLeftPercent`：Context 条最左侧压缩预警斜线区域宽度，默认 20%。
+- `context.levelThresholds`：Context 剩余量颜色分档。
+- `provider.levelThresholds`：Provider 剩余额度颜色分档。
+
+颜色分档按「剩余百分比」计算。默认含义是：剩余 60% 进入 notice，50% 进入 warn，40% 进入 danger，30% 进入 critical。
+
+## Provider 余额框
+
+Provider 余额框是可选功能。用户脚本不直接请求服务商 API，不读取本机密钥文件。数据流是：
+
+1. `tools/provider-helper.js` 在本机 Node.js 进程里读取私有配置。
+2. helper 请求服务商订阅 / 余额接口。
+3. helper 把结果规范化为脱敏 summary。
+4. helper 通过 Codex++ 打开的 CDP 调试端口把 summary 写入 Codex 页面。
+5. 用户脚本只渲染 summary 里的显示名、已用额度、总额度、剩余额度、状态和 UI 配置。
+
+需要的本机配置文件：
 
 ```text
 %APPDATA%\codex-context-used-meter\provider-config.json
@@ -48,156 +115,239 @@ New-Item -ItemType Directory -Force "$env:APPDATA\codex-context-used-meter"; Cop
 %APPDATA%\codex-context-used-meter\ui-config.json
 ```
 
-`provider-config.json` 里填写：
+复制模板：
 
-- `id`：本地唯一 ID，比如 `primary`。
-- `displayName`：界面上显示的 Provider 名称。
-- `baseUrl`：服务商 API 根地址。
-- `endpointPath`：订阅 / 余额接口路径。
-- `auth.accessTokenSecret`：在 `provider-secrets.json` 里保存 token 的字段名。
-- `userHeader.name`：服务商要求的用户 ID header 名；不需要就留空。
-- `userHeader.valueSecret`：在 `provider-secrets.json` 里保存用户 ID 的字段名；不需要就留空。
+```powershell
+New-Item -ItemType Directory -Force "$env:APPDATA\codex-context-used-meter"
+Copy-Item ".\config\provider-config.json" "$env:APPDATA\codex-context-used-meter\provider-config.json" -Force
+Copy-Item ".\config\provider-secrets.json" "$env:APPDATA\codex-context-used-meter\provider-secrets.json" -Force
+Copy-Item ".\config\ui-config.json" "$env:APPDATA\codex-context-used-meter\ui-config.json" -Force
+```
 
-`provider-secrets.json` 只放本机私密值，字段名要和 `provider-config.json` 里的 `accessTokenSecret` / `valueSecret` 对上。
+`provider-config.json` 只放非密钥配置：
 
-推荐安装自动管理器：
+- `codex.debugPort`：Codex++ 打开的 CDP 调试端口。
+- `providers[].id`：Provider 本地标识。
+- `providers[].displayName`：界面上显示的 Provider 名称。
+- `providers[].baseUrl`：Provider API Base URL。
+- `providers[].endpointPath`：订阅 / 余额接口路径。
+- `providers[].auth.accessTokenSecret`：token 在 `provider-secrets.json` 里的字段名。
+- `providers[].userHeader.name`：服务商要求的额外用户 ID header 名；不需要就留空。
+- `providers[].userHeader.valueSecret`：用户 ID 在 `provider-secrets.json` 里的字段名；不需要就留空。
+- `providers[].refreshIntervalMs`：刷新周期，默认 10 秒。
+- `providers[].quota.amountDivisor`：Provider 原始额度与显示金额之间的换算因子。
+
+`provider-secrets.json` 只放本机私密值。字段名要和 `provider-config.json` 里的 `accessTokenSecret` / `valueSecret` 对上。
+
+不要把真实 token、用户 ID、服务商地址、完整私有配置或原始响应贴到 issue、聊天、日志或提交里。
+
+## 启动 Provider helper
+
+安装跟随 Codex 自动启停的 supervisor：
 
 ```powershell
 .\tools\install-provider-supervisor.ps1
 ```
 
-它会给当前 Windows 用户创建一个计划任务。登录后会自动启动一个很轻的 supervisor：Codex 打开时，它会启动 `provider-helper.js`；Codex 关闭后，它会停掉 helper。这样余额框会跟着 Codex 出现和消失，平时不需要手动开 helper。
+它会给当前 Windows 用户创建计划任务。登录后 supervisor 会常驻一个轻量进程：Codex 打开时启动 `provider-helper.js`，Codex 关闭后停止 helper。
 
-如果你只想临时测试，也可以手动跑一次 helper：
+只运行一次 helper 做验证：
 
 ```powershell
 node .\tools\provider-helper.js --once
 ```
 
-supervisor / helper 需要能访问 Codex App 的 CDP 调试端口。通常 Codex++ 启动 Codex 后会自动打开这个端口；如果你的端口不是默认值，可以在 `provider-config.json` 里配置 `codex.debugPort`，或设置环境变量 `CCM_CODEX_DEBUG_PORT`。
-
-Provider 框显示的名字来自 `provider-config.json` 里的 `displayName`。比如你可以写成自己服务商的简称；公开仓库里的模板只放通用占位名。
-
-Provider 金额默认刷新周期是 10 秒，可以在 `provider-config.json` 里的 `refreshIntervalMs` 调整。
-
-UI 配置单独放在 `ui-config.json`，不要塞进 Provider 配置。Context 条最左边的黄/橙斜线表示“快要压缩了”：当剩余上下文掉进这段区域，就说明这个会话接近压缩点。斜线区域默认占左侧 20%，可以用 `ui-config.json` 里的 `context.compressionWarningLeftPercent` 调整。Context 和 Provider 余额条的颜色分档分别由 `context.levelThresholds` 和 `provider.levelThresholds` 控制，默认剩余 60% 开始提示，50% 进入预警，40% 进入警告，30% 进入严重警告。
-
-只测试 provider 请求和响应解析，不注入 Codex 页面：
+只测试 Provider 请求和响应解析，不注入 Codex 页面：
 
 ```powershell
 node .\tools\provider-helper.js --once --no-cdp --print-summary
 ```
 
-注意：`provider-secrets.json` 不要提交到 Git，不要贴到 issue，不要发给别人。
+如果验证输出可能包含敏感字段，只保留 HTTP 状态、provider 是否 active、字段是否存在这类摘要，不要回显完整响应。
 
-如果以后不想自动启动了：
+卸载 supervisor：
 
 ```powershell
 .\tools\uninstall-provider-supervisor.ps1
 ```
 
+## 排障
+
+Context 不显示：
+
+- 确认当前窗口是 Codex 对话页，不是头像、宠物或其它 overlay 页面。
+- 确认 Codex 页面已经暴露 context usage 信号；新会话刚打开时可能需要等待一次刷新。
+- 重新注入脚本或重启 Codex++。
+
+Provider 不显示：
+
+- 确认 `provider-helper.js` 或 supervisor 正在运行。
+- 确认 `provider-config.json` 和 `provider-secrets.json` 在 `%APPDATA%\codex-context-used-meter`。
+- 确认 `codex.debugPort` 与 Codex++ 实际 CDP 端口一致。
+- 用 `node .\tools\provider-helper.js --once --no-cdp --print-summary` 验证 Provider 解析。
+
+扣血动画重叠：
+
+- 当前版本的 token 和 Provider 扣血已经走统一队列，正常情况下不会重叠。
+- 如果页面里还在运行旧注入脚本，重启 Codex++ 或重新注入用户脚本。
+
 ## 让 Agent 自动安装
 
-你也可以直接复制下面这段 Prompt 给 Codex / Claude / 其他本机 Agent，让它帮你安装：
+可以把下面这段复制给本机 Agent：
 
 ```text
 请帮我安装 Codex Context Used Meter：
 
-1. 确认这台机器已经安装 Codex++。
-2. 创建 Codex++ 用户脚本目录：%APPDATA%\Codex++\user_scripts
-3. 从 https://raw.githubusercontent.com/Minghou-Lei/codex-context-used-meter/main/codex-context-used-meter.js 下载脚本。
-4. 保存为：%APPDATA%\Codex++\user_scripts\codex-context-used-meter.js
-5. 检查文件存在，并确认脚本内容里包含 __codexContextMeterInstalled。
-6. 提醒我在 Codex++ 里点击“重新加载用户脚本”，或者重启 Codex++。
-
-不要修改 Codex App 的安装目录。
-
-如果我还要配置 Provider 余额框，请先读取 @https://github.com/Minghou-Lei/codex-context-used-meter/blob/main/config/README.md 再继续。
+1. 使用这个仓库：https://github.com/Minghou-Lei/codex-context-used-meter
+2. 把 codex-context-used-meter.js 复制到 %APPDATA%\Codex++\user_scripts\codex-context-used-meter.js。
+3. 不要修改 Codex 全局配置，不要写入任何服务商密钥。
+4. 安装后确认目标文件存在，并检查脚本里的 SCRIPT_VERSION。
+5. 如果我要配置 Provider 余额框，请先读取仓库里的 config/README.md。
 ```
 
 ## 让 Agent 自动配置 Provider
 
-Provider 配置和脚本安装是两件事。脚本安装只负责显示 Context；Provider 配置会写入你的服务商地址、token、用户 ID 等私密信息。可以把下面这段单独复制给本机 Agent：
+Provider 配置和脚本安装是两件事。可以把下面这段单独复制给本机 Agent：
 
 ```text
 请帮我给 Codex Context Used Meter 配置 Provider 余额框：
 
-1. 不要修改 Codex App 安装目录，也不要把任何密钥写进 Git 仓库。
-2. 先读取 @https://github.com/Minghou-Lei/codex-context-used-meter/blob/main/config/README.md，按里面的字段说明执行。
-3. 确认仓库位置是我本机的 codex-context-used-meter 项目目录。
-4. 先引导我从服务商后台或接口文档里找到这些信息：Provider 显示名、API Base URL、订阅 / 余额接口路径、访问 token、是否需要额外用户 ID header、用户 ID header 名称、用户 ID 值。
-5. 明确提醒我：token 和用户 ID 属于敏感信息，应该只写入本机私有文件，不要贴到公开 issue、README、提交记录或聊天总结里。
-6. 创建私有配置目录：%APPDATA%\codex-context-used-meter
-7. 如果 %APPDATA%\codex-context-used-meter\provider-config.json 不存在，就从 config\provider-config.json 复制一份。
-8. 如果 %APPDATA%\codex-context-used-meter\provider-secrets.json 不存在，就从 config\provider-secrets.json 复制一份。
-9. 如果 %APPDATA%\codex-context-used-meter\ui-config.json 不存在，就从 config\ui-config.json 复制一份。
-10. 只在 %APPDATA%\codex-context-used-meter\provider-config.json 里填写非密钥配置：provider id、displayName、baseUrl、endpointPath、auth.accessTokenSecret、可选 userHeader.name、userHeader.valueSecret、refreshIntervalMs、quota.amountDivisor。
-11. 只在 %APPDATA%\codex-context-used-meter\provider-secrets.json 里填写真实 token 和真实用户 ID。
-12. 如果要调整 Context 或 Provider 余额条颜色阈值，只改 %APPDATA%\codex-context-used-meter\ui-config.json。
-13. 不要在聊天里回显 token、用户 ID、真实服务商地址或完整配置文件内容；需要确认时只输出字段是否存在、HTTP 状态、provider 是否 active。
-14. 运行 .\tools\install-provider-supervisor.ps1，让 Provider helper 跟随 Codex 自动启动和停止。
-15. 用 node .\tools\provider-helper.js --once --no-cdp --print-summary 做一次验证；如果输出里可能包含敏感信息，先改成只汇总验证结果再展示。
+1. 使用仓库：https://github.com/Minghou-Lei/codex-context-used-meter
+2. 先读取 config/README.md。
+3. 先说明需要我提供哪些值：Provider 显示名、API Base URL、订阅 / 余额接口路径、访问 token、是否需要额外用户 ID header、header 名、用户 ID 值。
+4. 不要在聊天里回显 token、用户 ID、真实服务商地址、完整配置文件或原始响应。
+5. 如果 %APPDATA%\codex-context-used-meter\provider-config.json 不存在，就从 config\provider-config.json 复制模板。
+6. 如果 %APPDATA%\codex-context-used-meter\provider-secrets.json 不存在，就从 config\provider-secrets.json 复制模板。
+7. 如果 %APPDATA%\codex-context-used-meter\ui-config.json 不存在，就从 config\ui-config.json 复制模板。
+8. 只把非密钥配置写入 provider-config.json。
+9. 只把真实 token 和真实用户 ID 写入 provider-secrets.json。
+10. 安装 tools\install-provider-supervisor.ps1。
+11. 用 node .\tools\provider-helper.js --once --no-cdp --print-summary 做一次验证；输出只保留脱敏摘要。
 ```
 
-## 注意
+## 安全边界
 
-这个脚本不是 Tampermonkey 脚本，也不是 Node.js 脚本。它是在 Codex App 渲染页里运行的 Codex++ 用户脚本。
-
-它不会修改 Codex App 安装文件。它依赖 Codex++ 的用户脚本注入能力，也会读取 Codex 页面里已经存在的运行态信息。Codex App 或 Codex++ 更新后，如果内部结构变化，脚本可能需要跟着修。
-
-脚本本身不主动上传会话内容，不额外发网络请求。
-
-Provider 余额框不会直接请求服务商，也不会读取本机密钥文件。真实 token、用户 ID、服务商地址应该只保存在本机私有配置里。
+- 不提交 `%APPDATA%\codex-context-used-meter` 下的本机私有配置。
+- 不提交真实 token、用户 ID、服务商 API 地址或原始响应。
+- 不把 `provider-secrets.json` 贴到 issue、聊天或日志。
+- 仓库内 `config/*.json` 只作为模板，保持为空值或占位值。
 
 ## License
 
-MIT. 使用、修改、分发都很宽松；分发副本或重要部分时需要保留版权声明和许可证文本；不提供任何担保。
+MIT
 
 ---
 
 # Codex Context Used Meter
 
-A Codex++ user script built for [BigPizzaV3/CodexPlusPlus](https://github.com/BigPizzaV3/CodexPlusPlus).
+A lightweight Codex App / Codex++ user script that shows the current conversation's context budget and can optionally show a provider balance card.
 
-It shows the current conversation's remaining context at the top of the Codex App UI, with a small progress bar. When token usage increases, it shows a lightweight right-to-left "damage number" animation.
+The user script only reads runtime signals already exposed in the Codex renderer page. Provider balance data is fetched by a local helper from private local config, normalized into a sanitized summary, and then pushed into the page. Real tokens, user IDs, provider endpoints, and raw provider responses must stay out of the renderer page and out of the repository.
 
 ## Demo
 
 ![Codex Context Used Meter demo](assets/codex-context-meter-demo.gif)
 
-[Watch the MP4 demo](assets/codex-context-meter-demo.mp4)
+## Features
 
-## What It Does
+- Shows `Context Left xx.x%` by default.
+- Can show `Context Used xx.x%` instead via `ui-config.json`.
+- Shows a striped warning zone on the left side of the Context bar when the conversation is close to compaction.
+- Optionally shows a Provider balance card with used, total, remaining, and status data.
+- Plays spend pop text from the whole component's left-middle outside edge.
+- Context token spend and Provider spend share one queue, so the pop text does not overlap.
+- Shows per-session Context / Provider spend history while hovering near the component.
+- Right-click menu switches between inline and floating modes.
+- Floating mode supports horizontal / vertical layout, drag position, and wheel zoom.
 
-- Shows `Context Left xx.x%`.
-- Shows used / total context tokens.
-- Tries to follow the currently opened conversation instead of another conversation.
-- Hides itself when no valid context usage value is available.
-- Only appears in Codex conversation views, not in unrelated Codex++ pages.
+## Install Script
 
-## Install
-
-Put `codex-context-used-meter.js` in the Codex++ user script directory:
-
-```text
-%APPDATA%\Codex++\user_scripts\codex-context-used-meter.js
-```
-
-Then reload user scripts from the Codex++ manager, or restart Codex++.
-
-## Optional: Provider Balance Card
-
-The script can show a provider balance card next to the Context card. The user script does not call the provider directly. A local helper reads private config, calls the provider, and pushes a sanitized summary into the Codex page through the CDP debug port opened by Codex++.
-
-Tokens, user IDs, and provider endpoints stay in private local config files. The Codex renderer page only receives sanitized balance, usage, status, and expiry values.
-
-Copy the config templates to a private local directory:
+Copy `codex-context-used-meter.js` into the Codex++ user scripts directory:
 
 ```powershell
-New-Item -ItemType Directory -Force "$env:APPDATA\codex-context-used-meter"; Copy-Item ".\config\provider-config.json" "$env:APPDATA\codex-context-used-meter\provider-config.json"; Copy-Item ".\config\provider-secrets.json" "$env:APPDATA\codex-context-used-meter\provider-secrets.json"; Copy-Item ".\config\ui-config.json" "$env:APPDATA\codex-context-used-meter\ui-config.json"
+New-Item -ItemType Directory -Force "$env:APPDATA\Codex++\user_scripts"
+Copy-Item ".\codex-context-used-meter.js" "$env:APPDATA\Codex++\user_scripts\codex-context-used-meter.js" -Force
 ```
 
-Edit these local files:
+Restart Codex++ / Codex App, or reload user scripts from Codex++.
+
+## UI Interaction
+
+Inline mode is the default. The component tries to mount into the Codex top toolbar, in the area to the left of the provider / model selector controls.
+
+Right-click the component to open the menu:
+
+- `Inline mode`: mount inside the toolbar.
+- `Floating mode`: show as a floating overlay.
+- `Horizontal layout`: arrange Context and Provider side by side in floating mode.
+- `Vertical layout`: stack Context and Provider in floating mode.
+
+In floating mode:
+
+- Hold the component briefly, then drag to move it.
+- Use the mouse wheel over the component to zoom it.
+- Mode, layout, position, and scale are stored in browser `localStorage`; they are not written to JSON config files.
+
+## UI Config
+
+The UI config template is [config/ui-config.json](config/ui-config.json). Runtime config should usually live at:
+
+```text
+%APPDATA%\codex-context-used-meter\ui-config.json
+```
+
+Copy the template:
+
+```powershell
+New-Item -ItemType Directory -Force "$env:APPDATA\codex-context-used-meter"
+Copy-Item ".\config\ui-config.json" "$env:APPDATA\codex-context-used-meter\ui-config.json" -Force
+```
+
+Available settings:
+
+```json
+{
+  "context": {
+    "showUsedInsteadOfLeft": false,
+    "compressionWarningLeftPercent": 20,
+    "levelThresholds": {
+      "criticalLeftPercent": 30,
+      "dangerLeftPercent": 40,
+      "warnLeftPercent": 50,
+      "noticeLeftPercent": 60
+    }
+  },
+  "provider": {
+    "levelThresholds": {
+      "criticalLeftPercent": 30,
+      "dangerLeftPercent": 40,
+      "warnLeftPercent": 50,
+      "noticeLeftPercent": 60
+    }
+  }
+}
+```
+
+Notes:
+
+- `context.showUsedInsteadOfLeft`: `false` shows `Context Left`; `true` shows `Context Used`. Default: `false`.
+- `context.compressionWarningLeftPercent`: width of the left-side compaction warning zone. Default: 20%.
+- `context.levelThresholds`: Context color thresholds.
+- `provider.levelThresholds`: Provider balance color thresholds.
+
+Thresholds are based on remaining percentage. By default, 60% remaining enters notice, 50% enters warn, 40% enters danger, and 30% enters critical.
+
+## Provider Balance Card
+
+The Provider balance card is optional. The user script does not call provider APIs and does not read local secret files. Data flow:
+
+1. `tools/provider-helper.js` reads private local config in a local Node.js process.
+2. The helper calls the provider subscription / balance endpoint.
+3. The helper normalizes the result into a sanitized summary.
+4. The helper writes that summary into the Codex page through the CDP debug port opened by Codex++.
+5. The user script only renders display name, used amount, total amount, remaining amount, status, and UI config from the summary.
+
+Local runtime config files:
 
 ```text
 %APPDATA%\codex-context-used-meter\provider-config.json
@@ -205,107 +355,123 @@ Edit these local files:
 %APPDATA%\codex-context-used-meter\ui-config.json
 ```
 
-Fill `provider-config.json` with:
+Copy templates:
 
-- `id`: a local unique ID, such as `primary`.
-- `displayName`: the provider name shown in the UI.
-- `baseUrl`: the provider API base URL.
-- `endpointPath`: the subscription / balance endpoint path.
-- `auth.accessTokenSecret`: the key name used for the token in `provider-secrets.json`.
-- `userHeader.name`: the provider's user ID header name; leave it empty if not needed.
-- `userHeader.valueSecret`: the key name used for the user ID in `provider-secrets.json`; leave it empty if not needed.
+```powershell
+New-Item -ItemType Directory -Force "$env:APPDATA\codex-context-used-meter"
+Copy-Item ".\config\provider-config.json" "$env:APPDATA\codex-context-used-meter\provider-config.json" -Force
+Copy-Item ".\config\provider-secrets.json" "$env:APPDATA\codex-context-used-meter\provider-secrets.json" -Force
+Copy-Item ".\config\ui-config.json" "$env:APPDATA\codex-context-used-meter\ui-config.json" -Force
+```
 
-Only put private values in `provider-secrets.json`. Its keys must match `accessTokenSecret` / `valueSecret` from `provider-config.json`.
+`provider-config.json` stores non-secret settings only:
 
-Recommended: install the automatic supervisor:
+- `codex.debugPort`: CDP debug port opened by Codex++.
+- `providers[].id`: local provider identifier.
+- `providers[].displayName`: provider name shown in the UI.
+- `providers[].baseUrl`: provider API base URL.
+- `providers[].endpointPath`: subscription / balance endpoint path.
+- `providers[].auth.accessTokenSecret`: key name for the token in `provider-secrets.json`.
+- `providers[].userHeader.name`: optional extra user ID header name.
+- `providers[].userHeader.valueSecret`: key name for the user ID in `provider-secrets.json`.
+- `providers[].refreshIntervalMs`: refresh interval. Default: 10 seconds.
+- `providers[].quota.amountDivisor`: conversion factor between provider raw quota and displayed amount.
+
+`provider-secrets.json` stores local private values only. Its keys must match `accessTokenSecret` / `valueSecret` in `provider-config.json`.
+
+Do not paste real tokens, user IDs, provider endpoints, full private config, or raw provider responses into issues, chat, logs, or commits.
+
+## Start Provider Helper
+
+Install the supervisor that starts and stops with Codex:
 
 ```powershell
 .\tools\install-provider-supervisor.ps1
 ```
 
-It creates a scheduled task for the current Windows user. After login, a lightweight supervisor starts automatically: when Codex is open, it starts `provider-helper.js`; when Codex exits, it stops the helper. The balance card then follows Codex without manual steps.
+It creates a scheduled task for the current Windows user. After login, the supervisor keeps a lightweight process alive: when Codex is open, it starts `provider-helper.js`; when Codex closes, it stops the helper.
 
-For a one-off test, you can still run:
+Run the helper once:
 
 ```powershell
 node .\tools\provider-helper.js --once
 ```
 
-The supervisor / helper needs access to the Codex App CDP debug port. Codex++ normally opens it when launching Codex. If your port is not the default, set `codex.debugPort` in `provider-config.json`, or set `CCM_CODEX_DEBUG_PORT`.
-
-The provider card name comes from `displayName` in `provider-config.json`. Use your own provider nickname there; the public template only uses a generic placeholder.
-
-The default provider balance refresh interval is 10 seconds. You can change it with `refreshIntervalMs` in `provider-config.json`.
-
-UI settings live in `ui-config.json`, not in the Provider config. The yellow/orange stripes on the left side of the Context bar mean "getting close to compaction." When the remaining context falls into that striped area, the conversation is near the compaction point. The striped zone defaults to the leftmost 20% and can be changed with `context.compressionWarningLeftPercent` in `ui-config.json`. Context and Provider bar colors are controlled separately with `context.levelThresholds` and `provider.levelThresholds`; by default the bar enters notice at 60% left, warn at 50% left, danger at 40% left, and critical at 30% left.
-
-Test provider fetching and response parsing without injecting the Codex page:
+Test provider fetch and response parsing without injecting into Codex:
 
 ```powershell
 node .\tools\provider-helper.js --once --no-cdp --print-summary
 ```
 
-Do not commit `provider-secrets.json`, paste it into issues, or share it.
+If verification output may contain sensitive fields, keep only a sanitized summary such as HTTP status, whether a provider is active, and whether required fields exist.
 
-To remove automatic startup later:
+Uninstall the supervisor:
 
 ```powershell
 .\tools\uninstall-provider-supervisor.ps1
 ```
 
+## Troubleshooting
+
+Context card is missing:
+
+- Make sure the current window is a Codex conversation page, not an avatar, pet, or other overlay page.
+- Make sure the Codex page has exposed context usage signals; a newly opened conversation may need one refresh cycle.
+- Reload the user script or restart Codex++.
+
+Provider card is missing:
+
+- Make sure `provider-helper.js` or the supervisor is running.
+- Make sure `provider-config.json` and `provider-secrets.json` exist under `%APPDATA%\codex-context-used-meter`.
+- Make sure `codex.debugPort` matches the actual Codex++ CDP port.
+- Run `node .\tools\provider-helper.js --once --no-cdp --print-summary` to validate provider parsing.
+
+Spend pop text overlaps:
+
+- Current versions queue Context and Provider spend effects, so they should not overlap.
+- If an old injected script is still running in the page, restart Codex++ or reload the user script.
+
 ## Agent Install Prompt
 
-You can also copy this prompt into Codex, Claude, or another local agent and let it install the script for you:
+You can copy this prompt into a local agent:
 
 ```text
-Please install Codex Context Used Meter for me:
+Please install Codex Context Used Meter:
 
-1. Confirm Codex++ is installed on this machine.
-2. Create the Codex++ user script directory: %APPDATA%\Codex++\user_scripts
-3. Download the script from https://raw.githubusercontent.com/Minghou-Lei/codex-context-used-meter/main/codex-context-used-meter.js
-4. Save it as: %APPDATA%\Codex++\user_scripts\codex-context-used-meter.js
-5. Check that the file exists and that its content contains __codexContextMeterInstalled.
-6. Remind me to click "Reload user scripts" in Codex++, or restart Codex++.
-
-Do not modify the Codex App installation directory.
-
-If I also want the Provider balance card configured, read @https://github.com/Minghou-Lei/codex-context-used-meter/blob/main/config/README.md before continuing.
+1. Use this repository: https://github.com/Minghou-Lei/codex-context-used-meter
+2. Copy codex-context-used-meter.js to %APPDATA%\Codex++\user_scripts\codex-context-used-meter.js.
+3. Do not modify global Codex config and do not write provider secrets.
+4. After installation, verify the target file exists and check SCRIPT_VERSION.
+5. If I also want the Provider balance card configured, read config/README.md first.
 ```
 
 ## Provider Setup Prompt
 
-Provider setup is separate from script installation. Script installation only shows Context usage; provider setup writes your provider endpoint, token, and user ID into private local config files. You can copy this separate prompt into a local agent:
+Provider setup is separate from script installation. You can copy this prompt into a local agent:
 
 ```text
 Please configure the Provider balance card for Codex Context Used Meter:
 
-1. Do not modify the Codex App installation directory, and do not write secrets into the Git repository.
-2. First read @https://github.com/Minghou-Lei/codex-context-used-meter/blob/main/config/README.md and follow its field descriptions.
-3. Confirm the repository path is my local codex-context-used-meter project directory.
-4. First guide me to find these values in the provider dashboard or API docs: provider display name, API base URL, subscription / balance endpoint path, access token, whether an extra user ID header is required, the user ID header name, and the user ID value.
-5. Clearly remind me that tokens and user IDs are sensitive. They should only be written to private local files, never to public issues, README files, commits, or chat summaries.
-6. Create the private config directory: %APPDATA%\codex-context-used-meter
-7. If %APPDATA%\codex-context-used-meter\provider-config.json does not exist, copy it from config\provider-config.json.
-8. If %APPDATA%\codex-context-used-meter\provider-secrets.json does not exist, copy it from config\provider-secrets.json.
-9. If %APPDATA%\codex-context-used-meter\ui-config.json does not exist, copy it from config\ui-config.json.
-10. Only write non-secret settings to %APPDATA%\codex-context-used-meter\provider-config.json: provider id, displayName, baseUrl, endpointPath, auth.accessTokenSecret, optional userHeader.name, userHeader.valueSecret, refreshIntervalMs, and quota.amountDivisor.
-11. Only write the real token and real user ID to %APPDATA%\codex-context-used-meter\provider-secrets.json.
-12. If you need to tune Context or Provider balance color thresholds, only edit %APPDATA%\codex-context-used-meter\ui-config.json.
-13. Do not echo tokens, user IDs, real provider endpoints, or full config file contents back into chat. When confirming, only report whether fields exist, the HTTP status, and whether the provider is active.
-14. Run .\tools\install-provider-supervisor.ps1 so the Provider helper starts and stops with Codex.
-15. Run node .\tools\provider-helper.js --once --no-cdp --print-summary once to verify. If the output may contain sensitive data, summarize the verification result instead of printing it.
+1. Use this repository: https://github.com/Minghou-Lei/codex-context-used-meter
+2. Read config/README.md first.
+3. First tell me which values I need to provide: provider display name, API base URL, subscription / balance endpoint path, access token, whether an extra user ID header is required, header name, and user ID value.
+4. Do not echo tokens, user IDs, real provider endpoints, full config files, or raw responses back into chat.
+5. If %APPDATA%\codex-context-used-meter\provider-config.json does not exist, copy the template from config\provider-config.json.
+6. If %APPDATA%\codex-context-used-meter\provider-secrets.json does not exist, copy the template from config\provider-secrets.json.
+7. If %APPDATA%\codex-context-used-meter\ui-config.json does not exist, copy the template from config\ui-config.json.
+8. Only write non-secret settings to provider-config.json.
+9. Only write the real token and real user ID to provider-secrets.json.
+10. Install tools\install-provider-supervisor.ps1.
+11. Run node .\tools\provider-helper.js --once --no-cdp --print-summary once; only show a sanitized summary.
 ```
 
-## Notes
+## Security Boundary
 
-This is not a Tampermonkey script and not a Node.js script. It runs inside the Codex App renderer page as a Codex++ user script.
-
-It does not modify the Codex App installation. It depends on Codex++ user script injection and reads runtime state already available inside the Codex page. If Codex App or Codex++ changes its internals, the script may need an update.
-
-The script does not upload conversation content or make extra network requests by itself.
-
-The provider balance card does not call the provider directly and does not read local secret files. Real tokens, user IDs, and provider endpoints should stay in private local config files.
+- Do not commit local private config under `%APPDATA%\codex-context-used-meter`.
+- Do not commit real tokens, user IDs, provider API endpoints, or raw provider responses.
+- Do not paste `provider-secrets.json` into issues, chat, or logs.
+- Repository `config/*.json` files are templates only and should keep empty or placeholder values.
 
 ## License
 
-MIT. Use it, change it, ship it; keep the copyright and license notice when distributing copies or substantial portions. No warranty.
+MIT

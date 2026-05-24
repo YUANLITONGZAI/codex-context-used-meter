@@ -1,5 +1,6 @@
 {
   "context": {
+    "showUsedInsteadOfLeft": false,
     "compressionWarningLeftPercent": 20,
     "levelThresholds": {
       "criticalLeftPercent": 30,
