@@ -6,11 +6,19 @@
 
 ## 效果展示
 
+完整动图：展示 Context / Provider 状态条、消耗动效、悬停历史图和基础交互。
+
 ![Codex Context Used Meter 效果展示](assets/codex-context-meter-demo.gif)
+
+Inline 状态栏：组件挂在 Codex 输入栏附近，显示 Context 余量和可选 Provider 余额。
 
 ![Inline 状态栏显示 Context 与 Provider 余量](assets/floating-status-bar.png)
 
+Floating 右键菜单：切换 inline / floating 模式，以及横向 / 纵向布局。
+
 ![右键菜单切换 inline / floating 与横向 / 纵向布局](assets/floating-layout-menu.png)
+
+会话历史图：显示当前会话近一小时的 Context / Provider 单次消耗和标题栏累计值。
 
 ![当前会话的 Context / Provider 单次消耗历史图](assets/session-spend-history.png)
 
@@ -254,11 +262,19 @@ The user script only reads runtime signals already exposed in the Codex renderer
 
 ## Demo
 
+Full animation: shows the Context / Provider bars, spend effect, hover history chart, and basic interactions.
+
 ![Codex Context Used Meter demo](assets/codex-context-meter-demo.gif)
+
+Inline status bar: mounts near the Codex input bar and shows Context remaining plus optional Provider balance.
 
 ![Inline status bar showing Context and Provider balance](assets/floating-status-bar.png)
 
+Floating context menu: switches inline / floating mode and horizontal / vertical layout.
+
 ![Right-click menu for inline / floating and horizontal / vertical layout](assets/floating-layout-menu.png)
+
+Session history chart: shows current-session Context / Provider per-spend events and the cumulative total in the header.
 
 ![Current-session Context / Provider per-spend history charts](assets/session-spend-history.png)
 
