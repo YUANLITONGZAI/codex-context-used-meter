@@ -8,7 +8,7 @@
 
 ![Codex Context Used Meter 效果展示](assets/codex-context-meter-demo.gif)
 
-![悬浮状态栏显示 Context 与 Provider 余量](assets/floating-status-bar.png)
+![Inline 状态栏显示 Context 与 Provider 余量](assets/floating-status-bar.png)
 
 ![右键菜单切换 inline / floating 与横向 / 纵向布局](assets/floating-layout-menu.png)
 
@@ -16,16 +16,15 @@
 
 ## 功能
 
-- 显示 `Context Left xx.x%`，默认表达「还剩多少上下文」。
-- 可通过 `ui-config.json` 把 Context 显示切换为 `Context Used xx.x%`。
-- Context 条左侧的黄 / 橙斜线表示接近压缩点的区域。
-- 可选显示 Provider 余额框，例如订阅额度、已用金额、剩余额度；未配置 Provider 时只显示 Context，其它功能不受影响。
-- 新消耗 token 或 Provider 余额变化时，从整个组件最左侧中间外侧播放统一的扣血动画。
-- token 扣血和 Provider 扣血共用队列，不会同时重叠显示。
-- 鼠标悬停在 Context / Provider 面板上时，系统悬浮提示显示当前真实数值。
-- 鼠标悬停在组件附近时显示当前会话近一小时消耗折线图，Context / Provider 独立统计；图表点值是每次单独消耗，标题栏右侧显示当前会话累计值。
-- 右键组件可在 inline / floating 模式之间切换。
-- floating 模式支持左右排列和上下排列，并支持拖动位置与滚轮缩放；floating 右键菜单会提示可用鼠标滚轮缩放。
+- **Context 余量**：默认显示 `Context Left xx.x%`，表示当前会话还剩多少上下文。
+- **Context 显示模式**：可通过 `ui-config.json` 切换为 `Context Used xx.x%`。
+- **压缩预警区**：Context 条左侧的黄 / 橙斜线标记接近压缩点的区域。
+- **Provider 余额框**：可选显示订阅额度、已用金额、剩余额度和状态；未配置 Provider 时仅显示 Context。
+- **消耗动效**：新消耗 token 或 Provider 余额变化时显示统一的扣血动画。
+- **悬浮提示**：鼠标悬停在 Context / Provider 面板上时显示当前真实数值。
+- **会话历史图**：鼠标悬停在组件附近时显示当前会话近一小时消耗折线图，Context / Provider 独立统计；图表点值是每次单独消耗，标题栏右侧显示当前会话累计值。
+- **显示位置**：右键组件可在 inline / floating 模式之间切换。
+- **Floating 布局**：floating 模式支持左右排列、上下排列、拖动位置和滚轮缩放。
 
 ## 安装脚本
 
@@ -257,7 +256,7 @@ The user script only reads runtime signals already exposed in the Codex renderer
 
 ![Codex Context Used Meter demo](assets/codex-context-meter-demo.gif)
 
-![Floating status bar showing Context and Provider balance](assets/floating-status-bar.png)
+![Inline status bar showing Context and Provider balance](assets/floating-status-bar.png)
 
 ![Right-click menu for inline / floating and horizontal / vertical layout](assets/floating-layout-menu.png)
 
@@ -265,16 +264,15 @@ The user script only reads runtime signals already exposed in the Codex renderer
 
 ## Features
 
-- Shows `Context Left xx.x%` by default.
-- Can show `Context Used xx.x%` instead via `ui-config.json`.
-- Shows a striped warning zone on the left side of the Context bar when the conversation is close to compaction.
-- Optionally shows a Provider balance card with used, total, remaining, and status data; when Provider is not configured, only Context is shown and the rest of the meter still works.
-- Plays spend pop text from the whole component's left-middle outside edge.
-- Context token spend and Provider spend share one queue, so the pop text does not overlap.
-- Shows live current values in the native tooltip when hovering over the Context / Provider panels.
-- Shows current-session one-hour spend line charts while hovering near the component, with separate Context and Provider series; chart points are individual spend events, and the header keeps the current-session cumulative total.
-- Right-click menu switches between inline and floating modes.
-- Floating mode supports horizontal / vertical layout, drag position, and wheel zoom; the floating right-click menu includes a mouse-wheel resize hint.
+- **Context remaining**: shows `Context Left xx.x%` by default to indicate how much context remains in the current session.
+- **Context display mode**: can switch to `Context Used xx.x%` through `ui-config.json`.
+- **Compaction warning zone**: yellow / orange stripes on the left side of the Context bar mark the area near compaction.
+- **Provider balance card**: optionally shows subscription quota, used amount, remaining amount, and status; when Provider is not configured, only Context is shown.
+- **Spend effect**: shows a unified spend animation when tokens are consumed or Provider balance changes.
+- **Hover tooltip**: shows live current values when hovering over the Context / Provider panels.
+- **Session history chart**: shows current-session one-hour spend charts while hovering near the component, with separate Context and Provider series; chart points are individual spend events, and the header shows the current-session cumulative total.
+- **Display placement**: right-click menu switches between inline and floating modes.
+- **Floating layout**: floating mode supports horizontal layout, vertical layout, drag position, and wheel zoom.
 
 ## Install Script
 
