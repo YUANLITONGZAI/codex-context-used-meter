@@ -31,9 +31,10 @@
   const MAX_CAPTURE_TEXT_LENGTH = 2000000;
   const SPEND_HISTORY_WINDOW_MS = 60 * 60 * 1000;
   const SPEND_HISTORY_MAX_ITEMS = 200;
-  const SPEND_HISTORY_CHART_WIDTH = 172;
-  const SPEND_HISTORY_CHART_HEIGHT = 54;
-  const SPEND_HISTORY_CHART_PADDING = 7;
+  const SPEND_HISTORY_CHART_WIDTH = 244;
+  const SPEND_HISTORY_CHART_HEIGHT = 72;
+  const SPEND_HISTORY_CHART_PADDING = 8;
+  const SPEND_HISTORY_CHART_AXIS_WIDTH = 52;
   const SPEND_EFFECT_DURATION_MS = 3000;
   const SPEND_EFFECT_FALLBACK_MS = 3200;
   const CONTEXT_SPEND_DEDUPE_WINDOW_MS = UPDATE_INTERVAL_MS * 2 + MUTATION_UPDATE_DELAY_MS;
@@ -518,7 +519,7 @@
         box-sizing: border-box;
         width: max-content;
         min-width: 240px;
-        max-width: min(420px, calc(100vw - 32px));
+        max-width: min(560px, calc(100vw - 32px));
         padding: 9px 10px 10px;
         border: 1px solid rgba(255, 255, 255, 0.14);
         border-radius: 8px;
@@ -554,12 +555,12 @@
 
       #${ROOT_ID} .ccm-history-grid {
         display: grid;
-        grid-template-columns: minmax(0, 190px) minmax(0, 190px);
-        gap: 10px;
+        grid-template-columns: minmax(0, 260px) minmax(0, 260px);
+        gap: 12px;
       }
 
       #${ROOT_ID} .ccm-history-grid[data-provider-visible="false"] {
-        grid-template-columns: minmax(0, 220px);
+        grid-template-columns: minmax(0, 292px);
       }
 
       #${ROOT_ID} .ccm-history-section {
@@ -599,17 +600,31 @@
       #${ROOT_ID} .ccm-history-chart {
         position: relative;
         width: 100%;
-        min-height: 58px;
+        min-height: 78px;
       }
 
       #${ROOT_ID} .ccm-history-svg {
         display: block;
         width: 100%;
-        height: 58px;
+        height: 78px;
         overflow: visible;
       }
 
+      #${ROOT_ID} .ccm-history-axis-line {
+        fill: none;
+        stroke: rgba(255, 255, 255, 0.16);
+        stroke-width: 1;
+        vector-effect: non-scaling-stroke;
+      }
+
+      #${ROOT_ID} .ccm-history-axis-label {
+        fill: rgba(255, 255, 255, 0.46);
+        font-size: 10px;
+        font-variant-numeric: tabular-nums;
+      }
+
       #${ROOT_ID} .ccm-history-gridline {
+        fill: none;
         stroke: rgba(255, 255, 255, 0.1);
         stroke-dasharray: 2 4;
         stroke-width: 1;
@@ -632,6 +647,11 @@
         fill: #fff7ed;
         stroke: var(--ccm-history-accent);
         stroke-width: 1.5;
+      }
+
+      #${ROOT_ID} .ccm-history-hit {
+        fill: transparent;
+        pointer-events: all;
       }
 
       #${ROOT_ID} .ccm-history-caption {
@@ -1442,6 +1462,23 @@
     return `-${Math.round(amount).toLocaleString("en-US")} Tokens`;
   }
 
+  function formatHistoryAxisValue(kind, amount) {
+    if (kind === "provider") return formatMoney(amount);
+    if (!Number.isFinite(amount)) return "--";
+    if (amount >= 1000000) return `${(amount / 1000000).toFixed(1)}M`;
+    if (amount >= 1000) return `${(amount / 1000).toFixed(1)}K`;
+    return String(Math.round(amount));
+  }
+
+  function formatHistoryPointTitle(kind, point) {
+    const lines = [
+      `${formatHistoryTime(point.item.time)} ${formatHistoryDelta(kind, point.item.amount)}`,
+      `Total: ${kind === "provider" ? formatMoney(point.total) : `${formatTokenCount(point.total)} Tokens`}`,
+    ];
+    if (point.item.meta) lines.push(String(point.item.meta));
+    return lines.join("\n");
+  }
+
   function svgPoint(value) {
     return Number.isFinite(value) ? value.toFixed(1) : "0.0";
   }
@@ -1452,7 +1489,12 @@
     const width = SPEND_HISTORY_CHART_WIDTH;
     const height = SPEND_HISTORY_CHART_HEIGHT;
     const padding = SPEND_HISTORY_CHART_PADDING;
-    const innerWidth = width - padding * 2;
+    const axisWidth = SPEND_HISTORY_CHART_AXIS_WIDTH;
+    const plotLeft = axisWidth;
+    const plotRight = width - padding;
+    const plotTop = padding;
+    const plotBottom = height - padding;
+    const innerWidth = plotRight - plotLeft;
     const innerHeight = height - padding * 2;
     const chart = document.createElement("div");
     chart.className = "ccm-history-chart";
@@ -1463,22 +1505,19 @@
     svg.setAttribute("preserveAspectRatio", "none");
     svg.setAttribute("aria-hidden", "true");
 
-    const gridline = document.createElementNS("http://www.w3.org/2000/svg", "path");
-    gridline.setAttribute("class", "ccm-history-gridline");
-    gridline.setAttribute("d", `M ${padding} ${height - padding} H ${width - padding}`);
-    svg.appendChild(gridline);
-
-    const points = [];
-    let running = 0;
+    const validItems = [];
     for (const item of items) {
       if (!Number.isFinite(item.amount) || item.amount <= 0) continue;
-      running += item.amount;
-      const x = padding + ((Math.max(cutoff, Math.min(now, item.time)) - cutoff) / SPEND_HISTORY_WINDOW_MS) * innerWidth;
-      const y = height - padding - (running / Math.max(total, running, 1)) * innerHeight;
-      points.push({ x, y, total: running, item });
+      const time = Number(item.time);
+      if (!Number.isFinite(time) || time < cutoff) continue;
+      validItems.push({
+        time: clampNumber(time, cutoff, now),
+        amount: item.amount,
+        meta: item.meta || "",
+      });
     }
 
-    if (!points.length) {
+    if (!validItems.length) {
       const empty = document.createElement("div");
       empty.className = "ccm-history-empty";
       empty.textContent = "No spend in the last hour";
@@ -1486,19 +1525,80 @@
       return chart;
     }
 
+    const firstTime = validItems[0].time;
+    const lastTime = validItems[validItems.length - 1].time;
+    const timeSpan = lastTime - firstTime;
+    const useIndexAxis = validItems.length === 1 || timeSpan <= 0;
+    const axisLabel = formatHistoryTime(firstTime) === formatHistoryTime(lastTime)
+      ? formatHistoryTime(firstTime)
+      : `${formatHistoryTime(firstTime)}-${formatHistoryTime(lastTime)}`;
+    const rawPoints = [];
+    let running = 0;
+    validItems.forEach((item, index) => {
+      running += item.amount;
+      const xRatio = useIndexAxis
+        ? index / Math.max(validItems.length - 1, 1)
+        : (item.time - firstTime) / timeSpan;
+      const x = plotLeft + xRatio * innerWidth;
+      rawPoints.push({ x, total: running, item });
+    });
+
+    const minTotal = Math.min(...rawPoints.map((point) => point.total));
+    const maxTotal = Math.max(...rawPoints.map((point) => point.total));
+    const valueRange = Math.max(maxTotal - minTotal, Math.max(maxTotal, 1) * 0.12, 1);
+    const axisMin = Math.max(0, minTotal - valueRange * 0.08);
+    const axisMax = maxTotal + valueRange * 0.08;
+    const axisRange = Math.max(axisMax - axisMin, 1);
+    const yForTotal = (value) => plotBottom - ((value - axisMin) / axisRange) * innerHeight;
+    const points = rawPoints.map((point) => ({
+      ...point,
+      y: yForTotal(point.total),
+    }));
+
     if (points.length === 1) {
-      points.unshift({
-        x: padding,
-        y: height - padding,
-        total: 0,
-        item: { time: cutoff, amount: 0, meta: "" },
+      const onlyPoint = points[0];
+      points.push({
+        x: plotRight,
+        y: onlyPoint.y,
+        total: onlyPoint.total,
+        item: onlyPoint.item,
+        isSynthetic: true,
       });
     }
+
+    const yAxis = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    yAxis.setAttribute("class", "ccm-history-axis-line");
+    yAxis.setAttribute("d", `M ${svgPoint(plotLeft)} ${svgPoint(plotTop)} V ${svgPoint(plotBottom)} H ${svgPoint(plotRight)}`);
+    svg.appendChild(yAxis);
+
+    const topGridline = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    topGridline.setAttribute("class", "ccm-history-gridline");
+    topGridline.setAttribute("d", `M ${svgPoint(plotLeft)} ${svgPoint(plotTop)} H ${svgPoint(plotRight)}`);
+    svg.appendChild(topGridline);
+
+    const bottomGridline = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    bottomGridline.setAttribute("class", "ccm-history-gridline");
+    bottomGridline.setAttribute("d", `M ${svgPoint(plotLeft)} ${svgPoint(plotBottom)} H ${svgPoint(plotRight)}`);
+    svg.appendChild(bottomGridline);
+
+    const topLabel = document.createElementNS("http://www.w3.org/2000/svg", "text");
+    topLabel.setAttribute("class", "ccm-history-axis-label");
+    topLabel.setAttribute("x", "2");
+    topLabel.setAttribute("y", svgPoint(plotTop + 4));
+    topLabel.textContent = formatHistoryAxisValue(kind, axisMax);
+    svg.appendChild(topLabel);
+
+    const bottomLabel = document.createElementNS("http://www.w3.org/2000/svg", "text");
+    bottomLabel.setAttribute("class", "ccm-history-axis-label");
+    bottomLabel.setAttribute("x", "2");
+    bottomLabel.setAttribute("y", svgPoint(plotBottom));
+    bottomLabel.textContent = formatHistoryAxisValue(kind, axisMin);
+    svg.appendChild(bottomLabel);
 
     const linePath = points
       .map((point, index) => `${index === 0 ? "M" : "L"} ${svgPoint(point.x)} ${svgPoint(point.y)}`)
       .join(" ");
-    const areaPath = `${linePath} L ${svgPoint(points[points.length - 1].x)} ${height - padding} L ${svgPoint(points[0].x)} ${height - padding} Z`;
+    const areaPath = `${linePath} L ${svgPoint(points[points.length - 1].x)} ${svgPoint(plotBottom)} L ${svgPoint(points[0].x)} ${svgPoint(plotBottom)} Z`;
 
     const area = document.createElementNS("http://www.w3.org/2000/svg", "path");
     area.setAttribute("class", "ccm-history-area");
@@ -1510,20 +1610,37 @@
     line.setAttribute("d", linePath);
     svg.appendChild(line);
 
-    const lastPoint = points[points.length - 1];
-    const point = document.createElementNS("http://www.w3.org/2000/svg", "circle");
-    point.setAttribute("class", "ccm-history-point");
-    point.setAttribute("cx", svgPoint(lastPoint.x));
-    point.setAttribute("cy", svgPoint(lastPoint.y));
-    point.setAttribute("r", "3");
-    svg.appendChild(point);
+    const realPoints = points.filter((historyPoint) => !historyPoint.isSynthetic);
+    const lastPoint = realPoints[realPoints.length - 1] || points[points.length - 1];
+    for (const historyPoint of realPoints) {
+      const isLatestPoint = historyPoint === lastPoint;
+      const point = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+      point.setAttribute("class", "ccm-history-point");
+      point.setAttribute("cx", svgPoint(historyPoint.x));
+      point.setAttribute("cy", svgPoint(historyPoint.y));
+      point.setAttribute("r", isLatestPoint ? "3" : "2.4");
+      const pointTitle = document.createElementNS("http://www.w3.org/2000/svg", "title");
+      pointTitle.textContent = formatHistoryPointTitle(kind, historyPoint);
+      point.appendChild(pointTitle);
+      svg.appendChild(point);
+
+      const hit = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+      hit.setAttribute("class", "ccm-history-hit");
+      hit.setAttribute("cx", svgPoint(historyPoint.x));
+      hit.setAttribute("cy", svgPoint(historyPoint.y));
+      hit.setAttribute("r", "8");
+      const title = document.createElementNS("http://www.w3.org/2000/svg", "title");
+      title.textContent = formatHistoryPointTitle(kind, historyPoint);
+      hit.appendChild(title);
+      svg.appendChild(hit);
+    }
 
     const caption = document.createElement("div");
     caption.className = "ccm-history-caption";
     const windowLabel = document.createElement("span");
-    windowLabel.textContent = "Last hour";
+    windowLabel.textContent = axisLabel;
     const lastLabel = document.createElement("span");
-    lastLabel.textContent = `${formatHistoryTime(lastPoint.item.time)} ${formatHistoryDelta(kind, lastPoint.item.amount)}`;
+    lastLabel.textContent = formatHistoryDelta(kind, lastPoint.item.amount);
     if (lastPoint.item.meta) lastLabel.title = String(lastPoint.item.meta);
     caption.append(windowLabel, lastLabel);
 
