@@ -16,6 +16,18 @@
 
 提交到远端的文档、脚本和示例命令应优先使用 `%APPDATA%` 形式，避免写入本机用户名或绝对用户目录。
 
+## Agent 安装入口
+
+当用户用下面这种方式指向本仓库时：
+
+```text
+请帮我安装：[Minghou-Lei/codex-context-used-meter](https://github.com/Minghou-Lei/codex-context-used-meter)
+```
+
+Agent 应先读取 `README.md` 里的“让 Agent 自动安装”章节，再执行本文件的部署命令。标准安装方式只有一个：把仓库根目录的 `codex-context-used-meter.js` 复制到 `%APPDATA%\Codex++\user_scripts\codex-context-used-meter.js`。
+
+不要修改 Codex 全局配置，不要用 DevTools 临时代码替代安装，不要把脚本放到其它目录作为替代安装方式。除非用户明确要求 Provider 余额框，否则不要创建 Provider 配置、密钥文件或 supervisor。
+
 ## 部署命令
 
 从仓库根目录更新本机 Codex++ 脚本时，使用：
