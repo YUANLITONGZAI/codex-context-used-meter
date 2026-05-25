@@ -2,7 +2,7 @@
 
 ## 生效位置
 
-这个仓库里的用户脚本只有放到 Codex++ 用户脚本目录后才会生效：
+这个仓库是基于 [Codex++](https://github.com/BigPizzaV3/CodexPlusPlus) 的用户脚本，不是 Codex 原生插件，也不是 Codex 插件市场里的插件。只有先安装并启用 Codex++，再把这个仓库里的用户脚本放到 Codex++ 用户脚本目录后才会生效：
 
 ```cmd
 %APPDATA%\Codex++\user_scripts
@@ -24,9 +24,9 @@
 请帮我安装：[Minghou-Lei/codex-context-used-meter](https://github.com/Minghou-Lei/codex-context-used-meter)
 ```
 
-Agent 应先读取 `README.md` 里的“让 Agent 自动安装”章节，再执行本文件的部署命令。标准安装方式只有一个：把仓库根目录的 `codex-context-used-meter.js` 复制到 `%APPDATA%\Codex++\user_scripts\codex-context-used-meter.js`。
+Agent 应先读取 `README.md` 里的“让 Agent 自动安装”章节，确认这是 Codex++ 用户脚本，不是 Codex 原生插件或插件市场插件，再执行本文件的部署命令。标准安装方式只有一个：把仓库根目录的 `codex-context-used-meter.js` 复制到 `%APPDATA%\Codex++\user_scripts\codex-context-used-meter.js`。
 
-不要修改 Codex 全局配置，不要用 DevTools 临时代码替代安装，不要把脚本放到其它目录作为替代安装方式。除非用户明确要求 Provider 余额框，否则不要创建 Provider 配置、密钥文件或 supervisor。
+不要去 Codex 插件市场查找或安装，不要修改 Codex 全局配置，不要用 DevTools 临时代码替代安装，不要把脚本放到其它目录作为替代安装方式。除非用户明确要求 Provider 余额框，否则不要创建 Provider 配置、密钥文件或 supervisor。
 
 ## 部署命令
 
