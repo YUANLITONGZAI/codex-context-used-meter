@@ -282,6 +282,21 @@
         --ccm-muted-soft: rgba(255, 255, 255, 0.46);
         --ccm-axis-line: rgba(255, 255, 255, 0.16);
         --ccm-gridline: rgba(255, 255, 255, 0.1);
+        --ccm-fill-normal: #22c55e;
+        --ccm-fill-normal-start: #2563eb;
+        --ccm-fill-normal-end: #22c55e;
+        --ccm-fill-notice: #0ea5e9;
+        --ccm-fill-notice-start: #06b6d4;
+        --ccm-fill-notice-end: #0ea5e9;
+        --ccm-fill-warn: #ea580c;
+        --ccm-fill-warn-start: #d97706;
+        --ccm-fill-warn-end: #ea580c;
+        --ccm-fill-danger: #dc2626;
+        --ccm-fill-danger-start: #e11d48;
+        --ccm-fill-danger-end: #dc2626;
+        --ccm-fill-critical: #b91c1c;
+        --ccm-fill-critical-start: #be123c;
+        --ccm-fill-critical-end: #b91c1c;
         --ccm-ring-size: 22px;
         --ccm-ring-width: 3px;
         --ccm-inline-max-width: 210px;
@@ -306,15 +321,15 @@
 
       #${ROOT_ID}[data-theme="light"] {
         --ccm-card-border: rgba(15, 23, 42, 0.14);
-        --ccm-card-bg: rgba(255, 255, 255, 0.82);
-        --ccm-card-bg-strong: rgba(255, 255, 255, 0.94);
+        --ccm-card-bg: rgba(248, 250, 252, 0.9);
+        --ccm-card-bg-strong: rgba(248, 250, 252, 0.96);
         --ccm-card-text: rgba(15, 23, 42, 0.86);
         --ccm-card-value: rgba(15, 23, 42, 0.96);
         --ccm-card-shadow: 0 5px 18px rgba(15, 23, 42, 0.14);
         --ccm-card-shadow-strong: 0 8px 28px rgba(15, 23, 42, 0.18);
-        --ccm-ring-rest: rgba(15, 23, 42, 0.14);
-        --ccm-ring-core: rgba(255, 255, 255, 0.98);
-        --ccm-track-bg: rgba(15, 23, 42, 0.14);
+        --ccm-ring-rest: rgba(15, 23, 42, 0.24);
+        --ccm-ring-core: rgba(248, 250, 252, 0.96);
+        --ccm-track-bg: rgba(15, 23, 42, 0.2);
         --ccm-panel-border: rgba(15, 23, 42, 0.12);
         --ccm-panel-bg: rgba(255, 255, 255, 0.96);
         --ccm-panel-text: rgba(15, 23, 42, 0.88);
@@ -437,7 +452,8 @@
         height: var(--ccm-ring-size);
         border-radius: 50%;
         background:
-          conic-gradient(var(--ccm-fill-color, #4ade80) 0deg, var(--ccm-fill-color, #4ade80) var(--ccm-ring-angle, 0deg), var(--ccm-ring-rest) var(--ccm-ring-angle, 0deg) 360deg);
+          conic-gradient(var(--ccm-fill-color, var(--ccm-fill-normal)) 0deg, var(--ccm-fill-color, var(--ccm-fill-normal)) var(--ccm-ring-angle, 0deg), var(--ccm-ring-rest) var(--ccm-ring-angle, 0deg) 360deg);
+        filter: drop-shadow(0 1px 1px rgba(15, 23, 42, 0.16));
       }
 
       #${ROOT_ID} .ccm-ring::after {
@@ -468,8 +484,8 @@
       }
 
       #${ROOT_ID} .ccm-fill {
-        --ccm-fill-color: #4ade80;
-        --ccm-fill-gradient: linear-gradient(90deg, #4ea1ff, #4ade80);
+        --ccm-fill-color: var(--ccm-fill-normal);
+        --ccm-fill-gradient: linear-gradient(90deg, var(--ccm-fill-normal-start), var(--ccm-fill-normal-end));
         width: 0%;
         height: 100%;
         border-radius: inherit;
@@ -513,32 +529,32 @@
       #${ROOT_ID} .ccm-context-card[data-level="warn"] .ccm-ring,
       #${ROOT_ID} .ccm-provider-card[data-level="warn"] .ccm-ring,
       #${ROOT_ID} .ccm-provider-card[data-level="warn"] .ccm-fill {
-        --ccm-fill-color: #f97316;
-        --ccm-fill-gradient: linear-gradient(90deg, #f59e0b, #f97316);
+        --ccm-fill-color: var(--ccm-fill-warn);
+        --ccm-fill-gradient: linear-gradient(90deg, var(--ccm-fill-warn-start), var(--ccm-fill-warn-end));
       }
 
       #${ROOT_ID} .ccm-context-card[data-level="danger"] .ccm-fill,
       #${ROOT_ID} .ccm-context-card[data-level="danger"] .ccm-ring,
       #${ROOT_ID} .ccm-provider-card[data-level="danger"] .ccm-ring,
       #${ROOT_ID} .ccm-provider-card[data-level="danger"] .ccm-fill {
-        --ccm-fill-color: #ef4444;
-        --ccm-fill-gradient: linear-gradient(90deg, #fb7185, #ef4444);
+        --ccm-fill-color: var(--ccm-fill-danger);
+        --ccm-fill-gradient: linear-gradient(90deg, var(--ccm-fill-danger-start), var(--ccm-fill-danger-end));
       }
 
       #${ROOT_ID} .ccm-context-card[data-level="notice"] .ccm-fill,
       #${ROOT_ID} .ccm-context-card[data-level="notice"] .ccm-ring,
       #${ROOT_ID} .ccm-provider-card[data-level="notice"] .ccm-ring,
       #${ROOT_ID} .ccm-provider-card[data-level="notice"] .ccm-fill {
-        --ccm-fill-color: #38bdf8;
-        --ccm-fill-gradient: linear-gradient(90deg, #22d3ee, #38bdf8);
+        --ccm-fill-color: var(--ccm-fill-notice);
+        --ccm-fill-gradient: linear-gradient(90deg, var(--ccm-fill-notice-start), var(--ccm-fill-notice-end));
       }
 
       #${ROOT_ID} .ccm-context-card[data-level="critical"] .ccm-fill,
       #${ROOT_ID} .ccm-context-card[data-level="critical"] .ccm-ring,
       #${ROOT_ID} .ccm-provider-card[data-level="critical"] .ccm-ring,
       #${ROOT_ID} .ccm-provider-card[data-level="critical"] .ccm-fill {
-        --ccm-fill-color: #dc2626;
-        --ccm-fill-gradient: linear-gradient(90deg, #f43f5e, #dc2626);
+        --ccm-fill-color: var(--ccm-fill-critical);
+        --ccm-fill-gradient: linear-gradient(90deg, var(--ccm-fill-critical-start), var(--ccm-fill-critical-end));
       }
 
       #${ROOT_ID} .ccm-context-card[data-compression-warning="true"] .ccm-compression-zone {
