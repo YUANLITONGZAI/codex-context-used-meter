@@ -49,6 +49,7 @@
   const DEFAULT_FLOATING_UI = {
     mode: "inline",
     floatingLayout: "horizontal",
+    theme: "dark",
     x: 16,
     y: 10,
     scale: 1,
@@ -262,6 +263,25 @@
     style.dataset.version = String(SCRIPT_VERSION);
     style.textContent = `
       #${ROOT_ID} {
+        --ccm-card-border: rgba(255, 255, 255, 0.16);
+        --ccm-card-bg: rgba(20, 22, 28, 0.78);
+        --ccm-card-bg-strong: rgba(20, 22, 28, 0.88);
+        --ccm-card-text: rgba(255, 255, 255, 0.92);
+        --ccm-card-value: rgba(255, 255, 255, 0.98);
+        --ccm-card-shadow: 0 5px 18px rgba(0, 0, 0, 0.18);
+        --ccm-card-shadow-strong: 0 8px 28px rgba(0, 0, 0, 0.24);
+        --ccm-ring-rest: rgba(255, 255, 255, 0.18);
+        --ccm-ring-core: rgba(20, 22, 28, 0.96);
+        --ccm-track-bg: rgba(255, 255, 255, 0.16);
+        --ccm-panel-border: rgba(255, 255, 255, 0.14);
+        --ccm-panel-bg: rgba(16, 18, 24, 0.94);
+        --ccm-panel-text: rgba(255, 255, 255, 0.9);
+        --ccm-panel-shadow: 0 10px 30px rgba(0, 0, 0, 0.28);
+        --ccm-muted-strong: rgba(255, 255, 255, 0.72);
+        --ccm-muted: rgba(255, 255, 255, 0.48);
+        --ccm-muted-soft: rgba(255, 255, 255, 0.46);
+        --ccm-axis-line: rgba(255, 255, 255, 0.16);
+        --ccm-gridline: rgba(255, 255, 255, 0.1);
         --ccm-ring-size: 22px;
         --ccm-ring-width: 3px;
         --ccm-inline-max-width: 210px;
@@ -282,6 +302,28 @@
         user-select: none;
         /* Codex/Electron 顶部可能是窗口拖拽区；不退出拖拽区时，真实鼠标 hover 会被系统层吞掉。 */
         -webkit-app-region: no-drag;
+      }
+
+      #${ROOT_ID}[data-theme="light"] {
+        --ccm-card-border: rgba(15, 23, 42, 0.14);
+        --ccm-card-bg: rgba(255, 255, 255, 0.82);
+        --ccm-card-bg-strong: rgba(255, 255, 255, 0.94);
+        --ccm-card-text: rgba(15, 23, 42, 0.86);
+        --ccm-card-value: rgba(15, 23, 42, 0.96);
+        --ccm-card-shadow: 0 5px 18px rgba(15, 23, 42, 0.14);
+        --ccm-card-shadow-strong: 0 8px 28px rgba(15, 23, 42, 0.18);
+        --ccm-ring-rest: rgba(15, 23, 42, 0.14);
+        --ccm-ring-core: rgba(255, 255, 255, 0.98);
+        --ccm-track-bg: rgba(15, 23, 42, 0.14);
+        --ccm-panel-border: rgba(15, 23, 42, 0.12);
+        --ccm-panel-bg: rgba(255, 255, 255, 0.96);
+        --ccm-panel-text: rgba(15, 23, 42, 0.88);
+        --ccm-panel-shadow: 0 10px 30px rgba(15, 23, 42, 0.16);
+        --ccm-muted-strong: rgba(51, 65, 85, 0.72);
+        --ccm-muted: rgba(71, 85, 105, 0.58);
+        --ccm-muted-soft: rgba(71, 85, 105, 0.54);
+        --ccm-axis-line: rgba(15, 23, 42, 0.16);
+        --ccm-gridline: rgba(15, 23, 42, 0.1);
       }
 
       #${ROOT_ID}[data-placement="inline"] {
@@ -341,11 +383,11 @@
         min-width: 0;
         max-width: var(--ccm-inline-max-width);
         padding: 5px 8px;
-        border: 1px solid rgba(255, 255, 255, 0.16);
+        border: 1px solid var(--ccm-card-border);
         border-radius: 999px;
-        background: rgba(20, 22, 28, 0.78);
-        color: rgba(255, 255, 255, 0.92);
-        box-shadow: 0 5px 18px rgba(0, 0, 0, 0.18);
+        background: var(--ccm-card-bg);
+        color: var(--ccm-card-text);
+        box-shadow: var(--ccm-card-shadow);
         font: 12px/1.35 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
         overflow: visible;
         backdrop-filter: blur(10px);
@@ -357,8 +399,8 @@
         max-width: 240px;
         padding: 8px 10px 9px;
         border-radius: 8px;
-        background: rgba(20, 22, 28, 0.88);
-        box-shadow: 0 8px 28px rgba(0, 0, 0, 0.24);
+        background: var(--ccm-card-bg-strong);
+        box-shadow: var(--ccm-card-shadow-strong);
       }
 
       #${ROOT_ID}[data-placement="floating"] .ccm-row {
@@ -395,7 +437,7 @@
         height: var(--ccm-ring-size);
         border-radius: 50%;
         background:
-          conic-gradient(var(--ccm-fill-color, #4ade80) 0deg, var(--ccm-fill-color, #4ade80) var(--ccm-ring-angle, 0deg), rgba(255, 255, 255, 0.18) var(--ccm-ring-angle, 0deg) 360deg);
+          conic-gradient(var(--ccm-fill-color, #4ade80) 0deg, var(--ccm-fill-color, #4ade80) var(--ccm-ring-angle, 0deg), var(--ccm-ring-rest) var(--ccm-ring-angle, 0deg) 360deg);
       }
 
       #${ROOT_ID} .ccm-ring::after {
@@ -403,11 +445,11 @@
         position: absolute;
         inset: var(--ccm-ring-width);
         border-radius: 50%;
-        background: rgba(20, 22, 28, 0.96);
+        background: var(--ccm-ring-core);
       }
 
       #${ROOT_ID} .ccm-value {
-        color: rgba(255, 255, 255, 0.98);
+        color: var(--ccm-card-value);
         font-weight: 650;
         font-variant-numeric: tabular-nums;
         overflow: hidden;
@@ -422,7 +464,7 @@
         height: 7px;
         overflow: hidden;
         border-radius: 999px;
-        background: rgba(255, 255, 255, 0.16);
+        background: var(--ccm-track-bg);
       }
 
       #${ROOT_ID} .ccm-fill {
@@ -459,7 +501,7 @@
       }
 
       #${ROOT_ID} .ccm-provider-value {
-        color: rgba(255, 255, 255, 0.98);
+        color: var(--ccm-card-value);
         font-weight: 650;
         font-variant-numeric: tabular-nums;
         overflow: hidden;
@@ -519,11 +561,11 @@
         min-width: 240px;
         max-width: min(560px, calc(100vw - 32px));
         padding: 9px 10px 10px;
-        border: 1px solid rgba(255, 255, 255, 0.14);
+        border: 1px solid var(--ccm-panel-border);
         border-radius: 8px;
-        background: rgba(16, 18, 24, 0.94);
-        color: rgba(255, 255, 255, 0.9);
-        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.28);
+        background: var(--ccm-panel-bg);
+        color: var(--ccm-panel-text);
+        box-shadow: var(--ccm-panel-shadow);
         font: 12px/1.35 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
         opacity: 0;
         transform: translateY(-4px);
@@ -586,12 +628,12 @@
       }
 
       #${ROOT_ID} .ccm-history-title {
-        color: rgba(255, 255, 255, 0.98);
+        color: var(--ccm-card-value);
         font-weight: 700;
       }
 
       #${ROOT_ID} .ccm-history-total {
-        color: rgba(255, 255, 255, 0.72);
+        color: var(--ccm-muted-strong);
         font-variant-numeric: tabular-nums;
       }
 
@@ -610,20 +652,20 @@
 
       #${ROOT_ID} .ccm-history-axis-line {
         fill: none;
-        stroke: rgba(255, 255, 255, 0.16);
+        stroke: var(--ccm-axis-line);
         stroke-width: 1;
         vector-effect: non-scaling-stroke;
       }
 
       #${ROOT_ID} .ccm-history-axis-label {
-        fill: rgba(255, 255, 255, 0.46);
+        fill: var(--ccm-muted-soft);
         font-size: 10px;
         font-variant-numeric: tabular-nums;
       }
 
       #${ROOT_ID} .ccm-history-gridline {
         fill: none;
-        stroke: rgba(255, 255, 255, 0.1);
+        stroke: var(--ccm-gridline);
         stroke-dasharray: 2 4;
         stroke-width: 1;
       }
@@ -658,7 +700,7 @@
         justify-content: space-between;
         gap: 8px;
         margin-top: 2px;
-        color: rgba(255, 255, 255, 0.48);
+        color: var(--ccm-muted);
         font-size: 11px;
         font-variant-numeric: tabular-nums;
         white-space: nowrap;
@@ -667,22 +709,43 @@
       #${ROOT_ID} .ccm-history-empty {
         position: absolute;
         inset: 19px 0 auto 0;
-        color: rgba(255, 255, 255, 0.46);
+        color: var(--ccm-muted-soft);
       }
 
       .ccm-context-menu {
+        --ccm-menu-border: rgba(255, 255, 255, 0.14);
+        --ccm-menu-bg: rgba(18, 20, 26, 0.96);
+        --ccm-menu-text: rgba(255, 255, 255, 0.92);
+        --ccm-menu-shadow: 0 12px 32px rgba(0, 0, 0, 0.36);
+        --ccm-menu-hover: rgba(255, 255, 255, 0.1);
+        --ccm-menu-checked: rgba(255, 255, 255, 0.08);
+        --ccm-menu-separator: rgba(255, 255, 255, 0.12);
+        --ccm-menu-check: #86efac;
+        --ccm-menu-hint: rgba(255, 255, 255, 0.48);
         position: fixed;
         z-index: 2147483647;
         min-width: 150px;
         padding: 5px;
-        border: 1px solid rgba(255, 255, 255, 0.14);
+        border: 1px solid var(--ccm-menu-border);
         border-radius: 8px;
-        background: rgba(18, 20, 26, 0.96);
-        color: rgba(255, 255, 255, 0.92);
-        box-shadow: 0 12px 32px rgba(0, 0, 0, 0.36);
+        background: var(--ccm-menu-bg);
+        color: var(--ccm-menu-text);
+        box-shadow: var(--ccm-menu-shadow);
         font: 12px/1.35 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
         backdrop-filter: blur(12px);
         -webkit-app-region: no-drag;
+      }
+
+      .ccm-context-menu[data-theme="light"] {
+        --ccm-menu-border: rgba(15, 23, 42, 0.12);
+        --ccm-menu-bg: rgba(255, 255, 255, 0.98);
+        --ccm-menu-text: rgba(15, 23, 42, 0.9);
+        --ccm-menu-shadow: 0 12px 32px rgba(15, 23, 42, 0.18);
+        --ccm-menu-hover: rgba(15, 23, 42, 0.08);
+        --ccm-menu-checked: rgba(15, 23, 42, 0.07);
+        --ccm-menu-separator: rgba(15, 23, 42, 0.12);
+        --ccm-menu-check: #16a34a;
+        --ccm-menu-hint: rgba(71, 85, 105, 0.58);
       }
 
       .ccm-context-menu button {
@@ -702,30 +765,30 @@
       }
 
       .ccm-context-menu button:hover {
-        background: rgba(255, 255, 255, 0.1);
+        background: var(--ccm-menu-hover);
       }
 
       .ccm-context-menu button[aria-checked="true"] {
-        background: rgba(255, 255, 255, 0.08);
+        background: var(--ccm-menu-checked);
       }
 
       .ccm-context-menu .ccm-menu-separator {
         height: 1px;
         margin: 5px 4px;
-        background: rgba(255, 255, 255, 0.12);
+        background: var(--ccm-menu-separator);
       }
 
       .ccm-context-menu .ccm-menu-check {
         flex: 0 0 14px;
         width: 14px;
-        color: #86efac;
+        color: var(--ccm-menu-check);
         font-weight: 800;
         text-align: center;
       }
 
       .ccm-context-menu .ccm-menu-hint {
         padding: 5px 8px 6px 21px;
-        color: rgba(255, 255, 255, 0.48);
+        color: var(--ccm-menu-hint);
         font-size: 11px;
         line-height: 1.3;
         white-space: nowrap;
@@ -1048,6 +1111,7 @@
     state.inlineHost = mount.parent;
     state.inlineBefore = before;
     root.dataset.placement = "inline";
+    applyFloatingUiState(root);
   }
 
   function applyFloatingUiState(root) {
@@ -1056,6 +1120,7 @@
     root.style.setProperty("--ccm-float-y", `${Math.round(uiState.y)}px`);
     root.style.setProperty("--ccm-float-scale", String(uiState.scale));
     root.dataset.floatingLayout = uiState.floatingLayout === "vertical" ? "vertical" : "horizontal";
+    root.dataset.theme = uiState.theme === "light" ? "light" : "dark";
   }
 
   function setUiMode(mode) {
@@ -1067,6 +1132,17 @@
     closeContextMenu();
     const root = state.root || document.getElementById(ROOT_ID);
     if (root) mountRoot(root);
+  }
+
+  function setUiTheme(theme) {
+    state.uiState = {
+      ...readUiState(),
+      theme: theme === "light" ? "light" : "dark",
+    };
+    writeUiState();
+    closeContextMenu();
+    const root = state.root || document.getElementById(ROOT_ID);
+    if (root) applyFloatingUiState(root);
   }
 
   function setFloatingLayout(layout) {
@@ -1101,8 +1177,10 @@
     const currentMode = (state.uiState && state.uiState.mode) === "floating" ? "floating" : "inline";
     const currentFloatingLayout =
       (state.uiState && state.uiState.floatingLayout) === "vertical" ? "vertical" : "horizontal";
+    const currentTheme = (state.uiState && state.uiState.theme) === "light" ? "light" : "dark";
     const menu = document.createElement("div");
     menu.className = "ccm-context-menu";
+    menu.dataset.theme = currentTheme;
     menu.setAttribute("role", "menu");
     const createRadioItem = (group, value, label, checked) => {
       const item = document.createElement("button");
@@ -1123,9 +1201,14 @@
       return item;
     };
     const items = [
+      createRadioItem("theme", "dark", "Dark theme", currentTheme === "dark"),
+      createRadioItem("theme", "light", "Light theme", currentTheme === "light"),
+      document.createElement("div"),
       createRadioItem("mode", "inline", "Inline mode", currentMode === "inline"),
       createRadioItem("mode", "floating", "Floating mode", currentMode === "floating"),
     ];
+    items[2].className = "ccm-menu-separator";
+    items[2].setAttribute("role", "separator");
     if (currentMode === "floating") {
       const separator = document.createElement("div");
       separator.className = "ccm-menu-separator";
@@ -1141,10 +1224,8 @@
       );
     }
     menu.replaceChildren(...items);
-    const x = Math.min(event.clientX, window.innerWidth - 170);
-    const y = Math.min(event.clientY, window.innerHeight - 80);
-    menu.style.left = `${Math.max(6, x)}px`;
-    menu.style.top = `${Math.max(6, y)}px`;
+    menu.style.left = `${Math.max(6, event.clientX)}px`;
+    menu.style.top = `${Math.max(6, event.clientY)}px`;
     menu.addEventListener("pointerdown", (menuEvent) => {
       menuEvent.stopPropagation();
     });
@@ -1156,9 +1237,20 @@
       }
 
       const layoutButton = menuEvent.target && menuEvent.target.closest("button[data-floating-layout]");
-      if (layoutButton) setFloatingLayout(layoutButton.dataset.floatingLayout);
+      if (layoutButton) {
+        setFloatingLayout(layoutButton.dataset.floatingLayout);
+        return;
+      }
+
+      const themeButton = menuEvent.target && menuEvent.target.closest("button[data-theme]");
+      if (themeButton) setUiTheme(themeButton.dataset.theme);
     });
     document.body.appendChild(menu);
+    const menuRect = menu.getBoundingClientRect();
+    const x = clampNumber(event.clientX, 6, Math.max(6, window.innerWidth - menuRect.width - 6));
+    const y = clampNumber(event.clientY, 6, Math.max(6, window.innerHeight - menuRect.height - 6));
+    menu.style.left = `${Math.round(x)}px`;
+    menu.style.top = `${Math.round(y)}px`;
     state.contextMenu = menu;
     state.contextMenuCloseListener = (closeEvent) => {
       if (closeEvent.type === "keydown" && closeEvent.key !== "Escape") return;
@@ -1293,6 +1385,7 @@
       return {
         mode: input.mode === "floating" ? "floating" : "inline",
         floatingLayout: input.floatingLayout === "vertical" ? "vertical" : "horizontal",
+        theme: input.theme === "light" ? "light" : "dark",
         x: clampNumber(Number(input.x), 0, Math.max(0, window.innerWidth - 80)),
         y: clampNumber(Number(input.y), 0, Math.max(0, window.innerHeight - 40)),
         scale: clampNumber(Number(input.scale) || 1, FLOAT_SCALE_MIN, FLOAT_SCALE_MAX),

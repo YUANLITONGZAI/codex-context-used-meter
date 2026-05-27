@@ -89,6 +89,8 @@ Copy-Item ".\codex-context-used-meter.js" "$env:APPDATA\Codex++\user_scripts\cod
 
 右键组件打开菜单：
 
+- `Dark theme`：使用默认暗黑主题。
+- `Light theme`：切换为明亮主题。
 - `Inline mode`：回到工具栏内显示。
 - `Floating mode`：改为悬浮显示。
 - `Horizontal layout`：floating 模式下左右排列 Context 和 Provider。
@@ -99,7 +101,7 @@ floating 模式下：
 
 - 按住组件短暂停留后拖动，可以移动位置。
 - 鼠标滚轮可以缩放组件。
-- 模式、布局、位置和缩放保存在浏览器本地 `localStorage`，不写入 JSON 配置文件。
+- 主题、模式、布局、位置和缩放保存在浏览器本地 `localStorage`，不写入 JSON 配置文件。
 
 ## UI 配置
 
@@ -349,6 +351,8 @@ Inline mode is the default. The component tries to mount into the Codex top tool
 
 Right-click the component to open the menu:
 
+- `Dark theme`: use the default dark theme.
+- `Light theme`: switch to the light theme.
 - `Inline mode`: mount inside the toolbar.
 - `Floating mode`: show as a floating overlay.
 - `Horizontal layout`: arrange Context and Provider side by side in floating mode.
@@ -359,7 +363,7 @@ In floating mode:
 
 - Hold the component briefly, then drag to move it.
 - Use the mouse wheel over the component to zoom it.
-- Mode, layout, position, and scale are stored in browser `localStorage`; they are not written to JSON config files.
+- Theme, mode, layout, position, and scale are stored in browser `localStorage`; they are not written to JSON config files.
 
 ## UI Config
 
