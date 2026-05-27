@@ -1,5 +1,9 @@
 # Codex Context Used Meter
 
+<a id="中文"></a>
+
+[中文](#中文) | [English](#english)
+
 一个通过 [Codex++](https://github.com/BigPizzaV3/CodexPlusPlus) 注入到 Codex App 的轻量用户脚本，用来在对话界面显示当前会话的上下文余量，并可选显示服务提供商余额。
 
 这不是 Codex 原生插件，也不是 Codex 插件市场里的插件。安装前需要先安装并启用 Codex++，然后把本仓库的用户脚本复制到 Codex++ 的 `user_scripts` 目录。
@@ -260,7 +264,11 @@ MIT
 
 ---
 
+<a id="english"></a>
+
 # Codex Context Used Meter
+
+[中文](#中文) | [English](#english)
 
 A lightweight user script injected into Codex App through [Codex++](https://github.com/BigPizzaV3/CodexPlusPlus). It shows the current conversation's context budget and can optionally show a provider balance card.
 
