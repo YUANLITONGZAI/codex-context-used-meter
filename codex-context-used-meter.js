@@ -4,31 +4,26 @@
   const API_KEY = "__codexContextMeter";
   const STYLE_ID = "codex-context-meter-style";
   const ROOT_ID = "codex-context-meter";
-  const CAPTURE_STATE_KEY = "__codexContextMeterCaptureState";
   const CONFIG_KEY = "__codexContextMeterConfig";
   const UI_STATE_STORAGE_KEY = "__codexContextMeterUiState";
   const PROVIDER_SUMMARY_KEY = "__codexContextMeterProviderSummary";
   const PROVIDER_SUMMARY_EVENT = "codex-context-meter-provider-summary";
-  const SCRIPT_VERSION = 81;
+  const SCRIPT_VERSION = 84;
   const UPDATE_INTERVAL_MS = 5000;
   const SLOW_SCAN_INTERVAL_MS = 30000;
   const SWITCH_RETRY_WINDOW_MS = 8000;
   const SWITCH_RETRY_INTERVAL_MS = 700;
   const NAVIGATION_PENDING_MS = 1500;
-  const CAPTURE_UPDATE_DELAY_MS = 30;
+  const NAVIGATION_UPDATE_DELAY_MS = 30;
   const MUTATION_UPDATE_DELAY_MS = 500;
   const ACTIVE_CONVERSATION_LOOKUP_CACHE_MS = 250;
   const APP_SIGNAL_READING_CACHE_MS = 120;
   const APP_SIGNAL_IMPORT_GRACE_MS = 600;
+  const INLINE_MOUNT_CACHE_MS = 5000;
   // 以下限额只约束兜底扫描；主路径读 app signal / 已缓存读数，不受这些值影响。
   const EXPENSIVE_FALLBACK_INTERVAL_MS = 2500;
   const REACT_HOST_SCAN_LIMIT = 180;
-  const STATUS_TEXT_NODE_SCAN_LIMIT = 1200;
-  const DOM_ATTRIBUTE_SCAN_LIMIT = 500;
-  const DOM_TEXT_PART_LIMIT = 120;
   const WINDOW_KEY_CACHE_MS = 10000;
-  const MAX_TEXT_LENGTH = 120000;
-  const MAX_CAPTURE_TEXT_LENGTH = 2000000;
   const SPEND_HISTORY_WINDOW_MS = 60 * 60 * 1000;
   const SPEND_HISTORY_MAX_ITEMS = 200;
   const SPEND_HISTORY_CHART_WIDTH = 244;
@@ -74,8 +69,16 @@
       },
     },
   };
-  const CAPTURE_TEXT_HINT_RE = /context|token|usage|latestTokenUsageInfo|window|budget|remaining|上下文|令牌|使用|窗口/i;
+  const STATUS_TEXT_NODE_SCAN_LIMIT = 240;
+  const CODEX_COMPOSER_SELECTOR = `[data-codex-composer="true"]`;
+  const THREAD_COMPOSER_SELECTOR = `[data-thread-find-composer="true"]`;
+  const CODEX_INTELLIGENCE_TRIGGER_SELECTOR = `[data-codex-intelligence-trigger="true"]`;
+  const REACT_CONVERSATION_SCAN_DEPTH = 14;
+  const APP_SIGNAL_SELECTOR_SCAN_INTERVAL_MS = 2000;
+  const APP_SIGNAL_SELECTOR_SCAN_LIMIT = 360;
   const THREAD_CONTENT_SELECTOR = [
+    `[data-thread-find-target="conversation"]`,
+    THREAD_COMPOSER_SELECTOR,
     '[data-app-shell-main-content-layout*="thread"]',
     '[class*="thread-edge"]',
     '[class*="transcript"]',
@@ -84,6 +87,9 @@
   ].join(",");
   const REACT_STATE_HOST_SELECTOR = [
     "[data-app-action-sidebar-thread-id]",
+    THREAD_COMPOSER_SELECTOR,
+    CODEX_COMPOSER_SELECTOR,
+    `[data-thread-find-target="conversation"]`,
     "[data-testid*='thread' i]",
     "[data-testid*='conversation' i]",
     "[data-testid*='message' i]",
@@ -97,6 +103,12 @@
     `[data-testid*="conversation" i]`,
     `[data-testid*="message" i]`,
     `article`,
+  ].join(",");
+  const INVALID_INLINE_MOUNT_SELECTOR = [
+    "button",
+    "[role='button']",
+    "[aria-haspopup]",
+    "[data-codex-intelligence-trigger]",
   ].join(",");
   const MESSAGE_MUTATION_SELECTOR = [
     `[data-thread-find-target]`,
@@ -133,8 +145,16 @@
   const PREFERRED_STATUS_KEY_SET = new Set(PREFERRED_STATUS_KEYS);
   const STATUS_TREE_KEY_RE = /context|usage|status|thread|conversation|token|query|data|props|memoized|pending|return|child|sibling|state|value|current|store|atom|map|cache/i;
   const APP_SIGNAL_SCOPE_KEY_RE = /memoized|pending|dependencies|firstContext|context|value|current|return|child|sibling|state|store|node|chain|scope|provider|props|query|cache/i;
-  const VALUE_TEXT_KEY_RE = /context|token|tokens|usage|window|budget|remaining|上下文|令牌|使用|窗口/i;
+  const CONVERSATION_REACT_KEY_RE = /^(?:props|children|memoizedProps|pendingProps|memoizedState|stateNode|child|sibling|return|alternate|value|current|context|node|chain|conversationId|localConversationId|threadId|id|key|params|thread|conversation)$/;
   const REACT_PRIVATE_KEY_RE = /^__react(?:Props|Fiber|Container)\$/;
+  const CONVERSATION_ID_KEYS = [
+    "conversationId",
+    "localConversationId",
+    "threadId",
+    "id",
+    "key",
+  ];
+  const CONVERSATION_ID_KEY_SET = new Set(CONVERSATION_ID_KEYS);
 
   for (const key of Object.keys(window)) {
     if (!/CodexContextUsageMeter(?:Installed)?$/.test(key)) continue;
@@ -164,10 +184,6 @@
 
   window[INSTALL_KEY] = true;
 
-  const contextTerms =
-    /context|token|tokens|usage|window|budget|remaining|上下文|令牌|使用|窗口/i;
-  const ratioWords =
-    /context|token|tokens|usage|window|budget|remaining|上下文|令牌|使用|窗口/i;
   const state = {
     activeConversationId: null,
     lastReading: null,
@@ -180,11 +196,16 @@
     historyPanel: null,
     value: null,
     fill: null,
+    compressionZone: null,
+    contextRing: null,
     providerValue: null,
     providerFill: null,
+    providerRing: null,
     providerSummary: null,
     inlineHost: null,
     inlineBefore: null,
+    inlineMountCache: null,
+    inlineMountLookupAt: 0,
     uiState: DEFAULT_FLOATING_UI,
     contextMenu: null,
     contextMenuCloseListener: null,
@@ -222,12 +243,14 @@
     appSignalCachedReading: null,
     appSignalCachedConversationId: null,
     appSignalCachedAt: 0,
+    appSignalLastSuccessAt: 0,
     appSignalModulesRequestedAt: 0,
+    appSignalTokenUsageSelector: null,
+    appSignalTokenUsageSelectorExport: null,
+    appSignalTokenUsageSelectorLookupAt: 0,
     waitingForAppSignalModules: false,
     expensiveFallbackScannedAt: 0,
     expensiveFallbackConversationId: null,
-    windowContextTextKeys: null,
-    windowContextTextKeysAt: 0,
     windowUsageKeys: null,
     windowUsageKeysAt: 0,
     reactPrivateKeyCache: new WeakMap(),
@@ -237,21 +260,6 @@
     threadContentLookupAt: 0,
     threadContentLookupResult: false,
   };
-
-  function getCaptureState() {
-    let captureState = window[CAPTURE_STATE_KEY];
-    if (!captureState || typeof captureState !== "object") {
-      captureState = {};
-      window[CAPTURE_STATE_KEY] = captureState;
-    }
-
-    captureState.version = SCRIPT_VERSION;
-    captureState.inspectText = inspectCandidateText;
-    captureState.inspectValue = inspectCandidateValue;
-    captureState.acceptReading = acceptReading;
-    captureState.parsePayloadText = parsePayloadText;
-    return captureState;
-  }
 
   function installStyle() {
     const existingStyle = document.getElementById(STYLE_ID);
@@ -871,27 +879,68 @@
     document.head.appendChild(style);
   }
 
-  function ensureRoot() {
-    let root = document.getElementById(ROOT_ID);
-    if (root) {
+  function bindRootElements(root) {
+    if (!root) return;
+
+    state.root = root;
+    state.contextCard = root.querySelector(".ccm-context-card");
+    state.providerCard = root.querySelector(".ccm-provider-card");
+    state.historyPanel = root.querySelector(".ccm-history-panel");
+    state.value = root.querySelector(".ccm-value");
+    state.fill = root.querySelector(".ccm-fill");
+    state.compressionZone = root.querySelector(".ccm-compression-zone");
+    state.contextRing = root.querySelector(".ccm-context-card .ccm-ring");
+    state.providerValue = root.querySelector(".ccm-provider-value");
+    state.providerFill = root.querySelector(".ccm-provider-fill");
+    state.providerRing = root.querySelector(".ccm-provider-card .ccm-ring");
+  }
+
+  function isRootBound(root) {
+    return !!(
+      root &&
+      state.root === root &&
+      state.contextCard &&
+      state.value &&
+      state.fill &&
+      state.compressionZone &&
+      state.contextRing &&
+      state.providerCard &&
+      state.providerValue &&
+      state.providerFill &&
+      state.providerRing
+    );
+  }
+
+  function ensureRootInfrastructure(root) {
+    if (root.dataset.infrastructureVersion !== String(SCRIPT_VERSION)) {
       root.querySelector(".ccm-hover-zone")?.remove();
       const contextTrack = root.querySelector(".ccm-context-card .ccm-track");
       if (contextTrack && !contextTrack.querySelector(".ccm-compression-zone")) {
         contextTrack.insertBefore(document.createElement("div"), contextTrack.firstChild);
         contextTrack.firstElementChild.className = "ccm-compression-zone";
       }
-      state.root = root;
-      state.contextCard = root.querySelector(".ccm-context-card");
-      state.providerCard = root.querySelector(".ccm-provider-card");
-      state.historyPanel = root.querySelector(".ccm-history-panel");
-      state.value = root.querySelector(".ccm-value");
-      state.fill = root.querySelector(".ccm-fill");
-      state.providerValue = root.querySelector(".ccm-provider-value");
-      state.providerFill = root.querySelector(".ccm-provider-fill");
-      installHistoryHover(root);
-      installContextMenu(root);
-      installFloatingControls(root);
-      mountRoot(root);
+      root.dataset.infrastructureVersion = String(SCRIPT_VERSION);
+    }
+    if (!isRootBound(root)) bindRootElements(root);
+    installHistoryHover(root);
+    installContextMenu(root);
+    installFloatingControls(root);
+  }
+
+  function isInlineMountCurrent(root) {
+    const uiState = state.uiState || readUiState();
+    if (uiState.mode === "floating") return root.parentNode === document.body && root.dataset.placement === "floating";
+    if (root.dataset.placement !== "inline") return false;
+    if (!state.inlineHost || !state.inlineHost.isConnected || root.parentNode !== state.inlineHost) return false;
+    if (state.inlineHost.closest(INVALID_INLINE_MOUNT_SELECTOR)) return false;
+    return state.inlineBefore ? state.inlineBefore.isConnected && root.nextSibling === state.inlineBefore : true;
+  }
+
+  function ensureRoot() {
+    let root = state.root && state.root.isConnected ? state.root : document.getElementById(ROOT_ID);
+    if (root) {
+      ensureRootInfrastructure(root);
+      if (!isInlineMountCurrent(root)) mountRoot(root);
       return root;
     }
 
@@ -936,22 +985,24 @@
         </div>
       </div>
     `;
-    state.root = root;
-    state.contextCard = root.querySelector(".ccm-context-card");
-    state.providerCard = root.querySelector(".ccm-provider-card");
-    state.historyPanel = root.querySelector(".ccm-history-panel");
-    state.value = root.querySelector(".ccm-value");
-    state.fill = root.querySelector(".ccm-fill");
-    state.providerValue = root.querySelector(".ccm-provider-value");
-    state.providerFill = root.querySelector(".ccm-provider-fill");
-    installHistoryHover(root);
-    installContextMenu(root);
-    installFloatingControls(root);
+    ensureRootInfrastructure(root);
     mountRoot(root);
     return root;
   }
 
   function findInlineMount() {
+    const now = Date.now();
+    if (
+      state.inlineMountCache &&
+      now - state.inlineMountLookupAt < INLINE_MOUNT_CACHE_MS &&
+      state.inlineMountCache.parent &&
+      state.inlineMountCache.parent.isConnected &&
+      (!state.inlineMountCache.before || state.inlineMountCache.before.isConnected)
+    ) {
+      return state.inlineMountCache;
+    }
+    state.inlineMountLookupAt = now;
+
     const visibleDirectChildren = (node) =>
       Array.from(node.children || []).filter((child) => child.id !== ROOT_ID && isVisibleElement(child));
     const buttonLikeCount = (node) =>
@@ -981,7 +1032,7 @@
       if (node.closest(CONVERSATION_CONTENT_SELECTOR)) return false;
       if (node.closest("aside, nav, [data-app-action-sidebar-thread-id], [data-app-action-sidebar-thread-active], [class*='sidebar' i]")) return false;
       if (node.closest("article, [data-message-author-role], [data-testid*='message' i], [data-testid*='conversation' i]")) return false;
-      if (!node.querySelector("textarea, input, [contenteditable='true'], [role='textbox']")) return false;
+      if (!node.querySelector(`textarea, input, [contenteditable='true'], [role='textbox'], ${CODEX_COMPOSER_SELECTOR}`)) return false;
       return true;
     };
     const findComposerArea = (node) => {
@@ -1058,9 +1109,35 @@
       }
       return control.parentElement || control;
     };
+    const rememberMount = (mount) => {
+      if (
+        mount &&
+        mount.parent &&
+        mount.parent.isConnected &&
+        !mount.parent.closest(INVALID_INLINE_MOUNT_SELECTOR)
+      ) {
+        state.inlineMountCache = mount;
+        return mount;
+      }
+
+      state.inlineMountCache = null;
+      return null;
+    };
 
     const footerMount = findComposerFooterMount();
-    if (footerMount) return footerMount;
+    if (footerMount) return rememberMount(footerMount);
+
+    const codexModelTrigger = document.querySelector(CODEX_INTELLIGENCE_TRIGGER_SELECTOR);
+    if (codexModelTrigger && isVisibleElement(codexModelTrigger)) {
+      const bar = findComposerArea(codexModelTrigger);
+      if (bar && isVisibleElement(bar) && isComposerArea(bar)) {
+        const toolbar = findToolbarForProviderModel(codexModelTrigger);
+        return rememberMount({
+          parent: toolbar,
+          before: directChildOf(toolbar, codexModelTrigger) || findProviderModelBefore(toolbar) || firstVisibleChild(toolbar),
+        });
+      }
+    }
 
     const providerModelControls = Array.from(document.querySelectorAll("button, [role='button'], [aria-haspopup]"))
       .filter(looksLikeProviderModelControl)
@@ -1074,10 +1151,10 @@
       if (!bar || !isVisibleElement(bar) || !isComposerArea(bar)) continue;
       const toolbar = findToolbarForProviderModel(control);
       const before = directChildOf(toolbar, control) || findProviderModelBefore(toolbar) || firstVisibleChild(toolbar);
-      return {
+      return rememberMount({
         parent: toolbar,
         before,
-      };
+      });
     }
 
     const sendButtons = Array.from(document.querySelectorAll("button, [role='button']"));
@@ -1091,18 +1168,20 @@
       if (!isComposerArea(bar)) continue;
       const toolbar = findToolbarForButton(button);
       const providerModelBefore = findProviderModelBefore(toolbar);
-      return {
+      return rememberMount({
         parent: toolbar,
         before: providerModelBefore || firstVisibleChild(toolbar),
-      };
+      });
     }
 
+    state.inlineMountCache = null;
     return null;
   }
 
   function mountRoot(root) {
     state.uiState = readUiState();
     if (state.uiState.mode === "floating") {
+      state.inlineMountCache = null;
       if (root.parentNode !== document.body) document.body.appendChild(root);
       state.inlineHost = null;
       root.dataset.placement = "floating";
@@ -1114,6 +1193,7 @@
     if (!mount || !mount.parent || root.contains(mount.parent)) {
       state.inlineHost = null;
       state.inlineBefore = null;
+      state.inlineMountCache = null;
       if (root.parentNode !== document.body) document.body.appendChild(root);
       root.dataset.placement = "floating";
       applyFloatingUiState(root);
@@ -1126,6 +1206,7 @@
     }
     state.inlineHost = mount.parent;
     state.inlineBefore = before;
+    state.inlineMountCache = mount;
     root.dataset.placement = "inline";
     applyFloatingUiState(root);
   }
@@ -1146,6 +1227,7 @@
     };
     writeUiState();
     closeContextMenu();
+    state.inlineMountCache = null;
     const root = state.root || document.getElementById(ROOT_ID);
     if (root) mountRoot(root);
   }
@@ -2050,6 +2132,7 @@
 
   function invalidateThreadContentCache() {
     state.threadContentLookupAt = 0;
+    state.inlineMountLookupAt = 0;
   }
 
   // Pet/头像层也运行在 app://-/index.html，需要额外按 route 排除非对话窗口。
@@ -2084,7 +2167,8 @@
     if (card.title !== title) card.title = title;
     if (value.textContent !== "Context Left --") value.textContent = "Context Left --";
     if (fill.style.width !== "0%") fill.style.width = "0%";
-    const ring = card.querySelector(".ccm-ring");
+    const ring = state.contextRing || card.querySelector(".ccm-ring");
+    if (ring && !state.contextRing) state.contextRing = ring;
     if (ring) ring.style.setProperty("--ccm-ring-angle", "0deg");
     card.hidden = true;
     updateDockVisibility(root);
@@ -2097,7 +2181,8 @@
     if (card.dataset.level !== "normal") card.dataset.level = "normal";
     if (card.title !== reason) card.title = reason;
     if (state.providerFill && state.providerFill.style.width !== "0%") state.providerFill.style.width = "0%";
-    const ring = card.querySelector(".ccm-ring");
+    const ring = state.providerRing || card.querySelector(".ccm-ring");
+    if (ring && !state.providerRing) state.providerRing = ring;
     if (ring) ring.style.setProperty("--ccm-ring-angle", "0deg");
     card.hidden = true;
     updateDockVisibility(root);
@@ -2157,7 +2242,8 @@
     if (card.title !== title) card.title = title;
     if (state.providerValue.textContent !== text) state.providerValue.textContent = text;
     if (state.providerFill.style.width !== width) state.providerFill.style.width = width;
-    const providerRing = card.querySelector(".ccm-ring");
+    const providerRing = state.providerRing || card.querySelector(".ccm-ring");
+    if (providerRing && !state.providerRing) state.providerRing = providerRing;
     if (providerRing) providerRing.style.setProperty("--ccm-ring-angle", `${leftPercent * 3.6}deg`);
     if (card.hidden) card.hidden = false;
     updateDockVisibility(root);
@@ -2220,6 +2306,14 @@
     return text.replace(/^[a-z]+:/i, "").toLowerCase();
   }
 
+  function normalizeConversationUuid(value) {
+    if (value == null) return null;
+    if (typeof value !== "string" && typeof value !== "number") return null;
+
+    const match = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i.exec(String(value));
+    return match ? match[0].toLowerCase() : null;
+  }
+
   function conversationIdsMatch(left, right) {
     const normalizedLeft = normalizeConversationId(left);
     const normalizedRight = normalizeConversationId(right);
@@ -2280,11 +2374,6 @@
     return keys;
   }
 
-  // 只缓存对象 key 列表，不缓存属性值；React/store 对象的值会变，key 通常稳定。
-  function getContextValueKeys(value) {
-    return getFilteredReflectKeys(value, "contextValueText", VALUE_TEXT_KEY_RE, 100);
-  }
-
   // Codex 部分会话 ID 只存在于 React 写到 DOM 节点上的私有 props，普通 attribute 读不到。
   function getReactPropValue(node, propName) {
     if (!node) return null;
@@ -2323,6 +2412,142 @@
     return null;
   }
 
+  function getLikelyObjectConversationId(value, depth = 3, seen = new WeakSet()) {
+    if (!value || typeof value !== "object") return null;
+    if (depth < 0 || seen.has(value)) return null;
+    seen.add(value);
+
+    for (const key of CONVERSATION_ID_KEYS) {
+      let candidate;
+      try {
+        candidate = value[key];
+      } catch {
+        continue;
+      }
+
+      const normalized = normalizeConversationUuid(candidate);
+      if (normalized) return normalized;
+    }
+
+    const nested = [
+      value.params,
+      value.thread,
+      value.conversation,
+      value.props,
+    ];
+    for (const child of nested) {
+      if (!child || typeof child !== "object") continue;
+      const normalized = getLikelyObjectConversationId(child, depth - 1, seen);
+      if (normalized) return normalized;
+    }
+
+    return null;
+  }
+
+  function readReactConversationIdFromValue(value, depth, seen) {
+    if (!value || typeof value !== "object" || depth < 0) return null;
+    if (seen.has(value)) return null;
+    seen.add(value);
+
+    const direct = getLikelyObjectConversationId(value);
+    if (direct) return direct;
+
+    if (value.nodeType === Node.ELEMENT_NODE) {
+      const elementConversationId = getElementConversationId(value);
+      if (elementConversationId) return elementConversationId;
+
+      for (const key of getReactPrivateKeys(value)) {
+        let child;
+        try {
+          child = value[key];
+        } catch {
+          continue;
+        }
+
+        const childConversationId = readReactConversationIdFromValue(child, depth - 1, seen);
+        if (childConversationId) return childConversationId;
+      }
+    }
+
+    if (Array.isArray(value)) {
+      const limit = Math.min(value.length, 40);
+      for (let index = 0; index < limit; index += 1) {
+        const childConversationId = readReactConversationIdFromValue(value[index], depth - 1, seen);
+        if (childConversationId) return childConversationId;
+      }
+      return null;
+    }
+
+    if (value instanceof Map) {
+      let index = 0;
+      for (const [mapKey, mapValue] of value) {
+        if (index >= 40) break;
+
+        const keyConversationId = normalizeConversationUuid(mapKey);
+        if (keyConversationId) return keyConversationId;
+
+        const mapKeyConversationId = readReactConversationIdFromValue(mapKey, depth - 1, seen);
+        if (mapKeyConversationId) return mapKeyConversationId;
+
+        const mapValueConversationId = readReactConversationIdFromValue(mapValue, depth - 1, seen);
+        if (mapValueConversationId) return mapValueConversationId;
+
+        index += 1;
+      }
+      return null;
+    }
+
+    const keys = getFilteredReflectKeys(value, "reactConversationId", CONVERSATION_REACT_KEY_RE, 120);
+    for (const key of keys) {
+      let child;
+      try {
+        child = value[key];
+      } catch {
+        continue;
+      }
+
+      if (CONVERSATION_ID_KEY_SET.has(key)) {
+        const keyConversationId = normalizeConversationUuid(child);
+        if (keyConversationId) return keyConversationId;
+      }
+
+      const childConversationId = readReactConversationIdFromValue(child, depth - 1, seen);
+      if (childConversationId) return childConversationId;
+    }
+
+    return null;
+  }
+
+  function readActiveConversationIdFromReact() {
+    const anchors = [
+      document.querySelector("main"),
+      document.querySelector(`[data-thread-find-target="conversation"]`),
+      document.querySelector(THREAD_COMPOSER_SELECTOR),
+      document.querySelector(CODEX_COMPOSER_SELECTOR),
+      document.getElementById("root"),
+    ].filter(Boolean);
+    const seen = new WeakSet();
+
+    for (const anchor of anchors) {
+      const direct = getElementConversationId(anchor);
+      if (direct) return direct;
+
+      for (const key of getReactPrivateKeys(anchor)) {
+        let value;
+        try {
+          value = anchor[key];
+        } catch {
+          continue;
+        }
+
+        const conversationId = readReactConversationIdFromValue(value, REACT_CONVERSATION_SCAN_DEPTH, seen);
+        if (conversationId) return conversationId;
+      }
+    }
+
+    return null;
+  }
+
   function readActiveConversationId() {
     const now = Date.now();
     if (now - state.activeConversationIdLookupAt < ACTIVE_CONVERSATION_LOOKUP_CACHE_MS) {
@@ -2347,6 +2572,13 @@
         state.activeConversationIdLookupAt = now;
         return conversationId;
       }
+    }
+
+    const reactConversationId = readActiveConversationIdFromReact();
+    if (reactConversationId) {
+      state.cachedActiveConversationId = reactConversationId;
+      state.activeConversationIdLookupAt = now;
+      return reactConversationId;
     }
 
     state.cachedActiveConversationId = null;
@@ -2395,6 +2627,7 @@
       state.lastScannedConversationId = null;
       state.expensiveFallbackScannedAt = 0;
       state.expensiveFallbackConversationId = null;
+      state.inlineMountLookupAt = 0;
       state.navigationPendingUntil = options.pendingNavigation ? Date.now() + NAVIGATION_PENDING_MS : 0;
       state.switchRetryUntil = Date.now() + SWITCH_RETRY_WINDOW_MS;
       scheduleRetryUpdate();
@@ -2445,31 +2678,6 @@
     return state.activeConversationId;
   }
 
-  function parsePercentText(text, source) {
-    if (!text || !contextTerms.test(text)) return null;
-
-    const patterns = [
-      /(?:context|token|tokens|usage|window|budget|remaining|上下文|令牌|使用|窗口)[^%\n]{0,80}?(\d{1,3}(?:\.\d+)?)\s*%/i,
-      /(\d{1,3}(?:\.\d+)?)\s*%[^%\n]{0,80}?(?:context|token|tokens|usage|window|budget|remaining|上下文|令牌|使用|窗口)/i,
-    ];
-
-    for (const pattern of patterns) {
-      const match = pattern.exec(text);
-      if (!match) continue;
-
-      const percent = Number(match[1]);
-      if (Number.isFinite(percent) && percent >= 0 && percent <= 100) {
-        const raw = match[0];
-        const usedPercent = /left|remaining|remain|available|free|剩余|可用/i.test(raw)
-          ? 100 - percent
-          : percent;
-        return makeReading(usedPercent, source, raw);
-      }
-    }
-
-    return null;
-  }
-
   // /status 输出格式的文本锚点；如果上游改了 Context 行文案，优先同步这里。
   function parseStatusContextText(text, source) {
     if (!text || !/\bContext\s*:/i.test(text)) return null;
@@ -2501,179 +2709,6 @@
       const leftPercent = Number(leftMatch[1]);
       if (Number.isFinite(leftPercent)) {
         return makeReading(100 - leftPercent, source, leftMatch[0]);
-      }
-    }
-
-    return null;
-  }
-
-  function parseRatioText(text, source) {
-    if (!text || !ratioWords.test(text)) return null;
-
-    const patterns = [
-      /(?:context|token|tokens|usage|window|budget|上下文|令牌|使用|窗口)[^\n]{0,100}?([\d,.]+)\s*([kKmM]?)\s*(?:\/|of)\s*([\d,.]+)\s*([kKmM]?)/i,
-      /([\d,.]+)\s*([kKmM]?)\s*(?:\/|of)\s*([\d,.]+)\s*([kKmM]?)[^\n]{0,100}?(?:context|token|tokens|usage|window|budget|上下文|令牌|使用|窗口)/i,
-    ];
-
-    for (const pattern of patterns) {
-      const match = pattern.exec(text);
-      if (!match) continue;
-
-      const used = toNumber(match[1], match[2]);
-      const limit = toNumber(match[3], match[4]);
-      if (!used || !limit || used < 0 || limit <= 0 || used > limit * 1.25) {
-        continue;
-      }
-
-      return makeReading((used / limit) * 100, source, match[0], used, limit);
-    }
-
-    return null;
-  }
-
-  function parseStructuredText(text, source) {
-    if (!text || !contextTerms.test(text)) return null;
-
-    const percentFields = [
-      /["']?(?:context|token|usage|window)[A-Za-z0-9_$-]{0,36}(?:percent|percentage)["']?\s*[:=]\s*(\d{1,3}(?:\.\d+)?)/i,
-      /["']?(?:percent|percentage)[A-Za-z0-9_$-]{0,36}(?:context|token|usage|window)["']?\s*[:=]\s*(\d{1,3}(?:\.\d+)?)/i,
-      /["']?(?:context|token|usage|window)[A-Za-z0-9_$-]{0,36}(?:ratio)["']?\s*[:=]\s*(0?\.\d+|1(?:\.0+)?)/i,
-    ];
-
-    for (const pattern of percentFields) {
-      const match = pattern.exec(text);
-      if (!match) continue;
-
-      let percent = Number(match[1]);
-      if (pattern.source.includes("ratio")) percent *= 100;
-      if (Number.isFinite(percent) && percent >= 0 && percent <= 100) {
-        return makeReading(percent, source, match[0]);
-      }
-    }
-
-    const usedMatch =
-      /["']?(?:context|token|tokens)[A-Za-z0-9_$-]{0,36}(?:used|current|total|input)["']?\s*[:=]\s*(\d+(?:\.\d+)?)/i.exec(
-        text,
-      );
-    const limitMatch =
-      /["']?(?:context|token|tokens)[A-Za-z0-9_$-]{0,36}(?:limit|max|window|capacity|budget)["']?\s*[:=]\s*(\d+(?:\.\d+)?)/i.exec(
-        text,
-      );
-
-    if (usedMatch && limitMatch) {
-      const used = Number(usedMatch[1]);
-      const limit = Number(limitMatch[1]);
-      if (Number.isFinite(used) && Number.isFinite(limit) && limit > 0) {
-        return makeReading((used / limit) * 100, source, `${usedMatch[0]} ${limitMatch[0]}`, used, limit);
-      }
-    }
-
-    return null;
-  }
-
-  function lowerCompact(value) {
-    return String(value || "")
-      .toLowerCase()
-      .replace(/[^a-z0-9\u4e00-\u9fa5]+/g, "");
-  }
-
-  function collectNumericFields(value, path, depth, seen, fields) {
-    if (fields.length > 400 || depth < 0 || value == null) return;
-
-    const valueType = typeof value;
-    if (valueType === "number" && Number.isFinite(value)) {
-      const key = lowerCompact(path);
-      const relevant = /(context|token|usage|window|budget|上下文|令牌|使用|窗口)/i.test(path);
-      fields.push({ path, key, value, relevant });
-      return;
-    }
-
-    if (valueType === "string") {
-      const number = Number(value.replace(/,/g, ""));
-      if (Number.isFinite(number)) {
-        const key = lowerCompact(path);
-        const relevant = /(context|token|usage|window|budget|上下文|令牌|使用|窗口)/i.test(path);
-        fields.push({ path, key, value: number, relevant });
-      }
-      return;
-    }
-
-    if (valueType !== "object") return;
-    if (seen.has(value)) return;
-    seen.add(value);
-
-    let keys = [];
-    try {
-      keys = Object.keys(value).slice(0, 120);
-    } catch {
-      return;
-    }
-
-    for (const key of keys) {
-      let child;
-      try {
-        child = value[key];
-      } catch {
-        continue;
-      }
-
-      collectNumericFields(child, path ? `${path}.${key}` : key, depth - 1, seen, fields);
-    }
-  }
-
-  function findField(fields, pattern) {
-    return fields.find((field) => field.relevant && pattern.test(field.key));
-  }
-
-  // 面向未知 payload 的最后一层结构化解析：只根据字段路径语义配对数值，避免绑定单一接口形状。
-  function parseStructuredValue(value, source) {
-    const fields = [];
-    collectNumericFields(value, "", 8, new WeakSet(), fields);
-
-    const percentField = findField(fields, /(percent|percentage|pct|百分比)/);
-    if (percentField && percentField.value >= 0 && percentField.value <= 100) {
-      return makeReading(percentField.value, source, percentField.path);
-    }
-
-    const ratioField = findField(fields, /(ratio|fraction|比例)/);
-    if (ratioField && ratioField.value >= 0 && ratioField.value <= 1) {
-      return makeReading(ratioField.value * 100, source, ratioField.path);
-    }
-
-    const usedField = findField(fields, /(used|current|consumed|filled|total|input|prompt|已用|当前|消耗)/);
-    const limitField = findField(fields, /(limit|max|maximum|capacity|window|budget|contextwindow|上限|最大|容量|预算|窗口)/);
-    if (usedField && limitField && limitField.value > 0 && usedField.value >= 0 && usedField.value <= limitField.value * 1.25) {
-      return makeReading(
-        (usedField.value / limitField.value) * 100,
-        source,
-        `${usedField.path} / ${limitField.path}`,
-        usedField.value,
-        limitField.value,
-      );
-    }
-
-    const remainingField = findField(fields, /(remaining|remain|left|available|free|剩余|可用)/);
-    if (remainingField && limitField && limitField.value > 0 && remainingField.value >= 0 && remainingField.value <= limitField.value) {
-      const used = limitField.value - remainingField.value;
-      return makeReading(
-        (used / limitField.value) * 100,
-        source,
-        `${remainingField.path} / ${limitField.path}`,
-        used,
-        limitField.value,
-      );
-    }
-
-    if (usedField && remainingField && usedField.value >= 0 && remainingField.value >= 0) {
-      const limit = usedField.value + remainingField.value;
-      if (limit > 0) {
-        return makeReading(
-          (usedField.value / limit) * 100,
-          source,
-          `${usedField.path} / ${remainingField.path}`,
-          usedField.value,
-          limit,
-        );
       }
     }
 
@@ -2721,88 +2756,29 @@
     return null;
   }
 
+  function looksLikeStatusContextUsageObject(value) {
+    if (!value || typeof value !== "object") return false;
+
+    const modelContextWindow = firstFiniteNumber(value.modelContextWindow, value.model_context_window);
+    const lastUsage = value.last || value.lastTokenUsage || value.last_token_usage;
+    const totalTokens = firstFiniteNumber(
+      lastUsage && lastUsage.totalTokens,
+      lastUsage && lastUsage.total_tokens,
+    );
+    if (Number.isFinite(modelContextWindow) && modelContextWindow > 0 && Number.isFinite(totalTokens) && totalTokens >= 0) {
+      return true;
+    }
+
+    const usedTokens = firstFiniteNumber(value.usedTokens, value.used_tokens);
+    const contextWindow = firstFiniteNumber(value.contextWindow, value.context_window);
+    return Number.isFinite(usedTokens) && usedTokens >= 0 && Number.isFinite(contextWindow) && contextWindow > 0;
+  }
+
   function firstFiniteNumber(...values) {
     for (const value of values) {
       const number = Number(value);
       if (Number.isFinite(number)) return number;
     }
-
-    return null;
-  }
-
-  function parseTokenCountInfoObject(value, source, conversationId) {
-    if (!value || typeof value !== "object") return null;
-
-    const modelContextWindow = firstFiniteNumber(value.model_context_window, value.modelContextWindow);
-    const lastUsage = value.last_token_usage || value.lastTokenUsage || value.last;
-    const totalTokens = firstFiniteNumber(
-      lastUsage && lastUsage.total_tokens,
-      lastUsage && lastUsage.totalTokens,
-    );
-
-    if (!Number.isFinite(modelContextWindow) || modelContextWindow <= 0) return null;
-    if (!Number.isFinite(totalTokens) || totalTokens < 0) return null;
-
-    const usedTokens = Math.min(totalTokens, modelContextWindow);
-    return withConversationId(makeReading(
-      (usedTokens / modelContextWindow) * 100,
-      source,
-      "token_count info",
-      usedTokens,
-      modelContextWindow,
-    ), conversationId);
-  }
-
-  // fetch / websocket / postMessage 捕获到的对象形状不一致，这里统一收敛到 reading 并过滤非当前会话。
-  function inspectCandidateValue(value, source, ownerConversationId) {
-    if (!value || typeof value !== "object") return null;
-
-    const activeConversationId = state.activeConversationId || readActiveConversationId();
-    const valueConversationId = getObjectConversationId(value) || normalizeConversationId(ownerConversationId);
-
-    if (activeConversationId && valueConversationId && !conversationIdsMatch(activeConversationId, valueConversationId)) {
-      return null;
-    }
-
-    const directReading = parseStatusContextUsageObject(value, source, valueConversationId);
-    if (directReading) return directReading;
-
-    if (
-      value.method === "thread/tokenUsage/updated" ||
-      value.type === "thread/tokenUsage/updated" ||
-      value.event === "thread/tokenUsage/updated"
-    ) {
-      const eventConversationId = getObjectConversationId(value.params || value) || valueConversationId;
-      if (activeConversationId && eventConversationId && !conversationIdsMatch(activeConversationId, eventConversationId)) {
-        return null;
-      }
-
-      const paramsReading =
-        parseStatusContextUsageObject(value.params && value.params.tokenUsage, source, eventConversationId) ||
-        parseStatusContextUsageObject(value.params, source, eventConversationId);
-      if (paramsReading) return paramsReading;
-    }
-
-    if (value.type === "token_count" || value.event === "token_count") {
-      const tokenCountReading = parseTokenCountInfoObject(value.info, source, valueConversationId || activeConversationId);
-      if (tokenCountReading) return tokenCountReading;
-    }
-
-    if (value.payload && value.payload.type === "token_count") {
-      const payloadConversationId = getObjectConversationId(value.payload) || valueConversationId || activeConversationId;
-      const tokenCountReading = parseTokenCountInfoObject(value.payload.info, source, payloadConversationId);
-      if (tokenCountReading) return tokenCountReading;
-    }
-
-    const nestedReading = parseStatusContextUsageObject(
-      value.contextUsage || value.tokenUsage || value.usage,
-      source,
-      valueConversationId,
-    );
-    if (nestedReading) return nestedReading;
-
-    const tokenCountInfoReading = parseTokenCountInfoObject(value.info, source, valueConversationId || activeConversationId);
-    if (tokenCountInfoReading) return tokenCountInfoReading;
 
     return null;
   }
@@ -3100,6 +3076,12 @@
       }
     }
 
+    const links = document.querySelectorAll(`link[rel="modulepreload"][href*="${fragment}"]`);
+    for (const link of links) {
+      const value = link && link.href;
+      if (value) return value;
+    }
+
     return new URL(fallbackPath, location.href).href;
   }
 
@@ -3111,11 +3093,11 @@
 
     const appServerUrl = findLoadedAssetUrl(
       "app-server-manager-signals",
-      "./assets/app-server-manager-signals-WXrD8bmC.js",
+      "./assets/app-server-manager-signals-7MlBpIlX.js",
     );
     const signalUrl = findLoadedAssetUrl(
       "setting-storage",
-      "./assets/setting-storage-DBp4-kRn.js",
+      "./assets/setting-storage-kJblH-wH.js",
     );
 
     state.appSignalModulesPromise = Promise.all([
@@ -3161,6 +3143,38 @@
     return null;
   }
 
+  function findTokenUsageSelector(scope, conversationId) {
+    if (!scope || !conversationId) return null;
+
+    if (state.appSignalTokenUsageSelector) return state.appSignalTokenUsageSelector;
+
+    const now = Date.now();
+    if (now - state.appSignalTokenUsageSelectorLookupAt < APP_SIGNAL_SELECTOR_SCAN_INTERVAL_MS) {
+      return null;
+    }
+    state.appSignalTokenUsageSelectorLookupAt = now;
+
+    const modules = state.appSignalModules;
+    const appServerSignals = modules && modules.appServerSignals;
+    if (!appServerSignals || typeof appServerSignals !== "object") return null;
+
+    let scanned = 0;
+    for (const [exportName, selector] of Object.entries(appServerSignals)) {
+      if (!selector || (typeof selector !== "object" && typeof selector !== "function")) continue;
+      scanned += 1;
+      if (scanned > APP_SIGNAL_SELECTOR_SCAN_LIMIT) break;
+
+      const value = readSignalValue(scope, selector, conversationId);
+      if (!looksLikeStatusContextUsageObject(value)) continue;
+
+      state.appSignalTokenUsageSelector = selector;
+      state.appSignalTokenUsageSelectorExport = exportName;
+      return selector;
+    }
+
+    return null;
+  }
+
   function scanAppSignalContextUsage(activeConversationId) {
     const now = Date.now();
     const requestedConversationId = normalizeConversationId(activeConversationId);
@@ -3188,14 +3202,14 @@
       normalizeConversationId(scope.value && scope.value.conversationId);
     if (!conversationId) return null;
 
-    // 当前版本里 appServerSignals.B 对应 latestTokenUsageInfo；上游重排导出时需要重新定位。
-    const latestTokenUsageSelector = modules.appServerSignals.B;
+    const latestTokenUsageSelector = findTokenUsageSelector(scope, conversationId);
     const tokenUsage = readSignalValue(scope, latestTokenUsageSelector, conversationId);
     const reading = parseStatusContextUsageObject(tokenUsage, "app-signal", conversationId);
     if (reading) {
       state.appSignalCachedReading = reading;
       state.appSignalCachedConversationId = conversationId;
       state.appSignalCachedAt = now;
+      state.appSignalLastSuccessAt = now;
       return reading;
     }
 
@@ -3207,216 +3221,6 @@
       state.appSignalModulesPromise &&
       !state.appSignalModules &&
       now - state.appSignalModulesRequestedAt < APP_SIGNAL_IMPORT_GRACE_MS
-    );
-  }
-
-  // 流式响应可能是 JSONL，也可能是一整段 JSON；两种都按同一套 reading 规则落库。
-  function parsePayloadText(text, source, ownerConversationId) {
-    const clipped = String(text || "").slice(0, MAX_CAPTURE_TEXT_LENGTH);
-    const textReading = parseTextForReading(clipped, source);
-    if (textReading) return withConversationId(textReading, ownerConversationId);
-
-    if (!contextTerms.test(clipped)) return null;
-
-    const lines = clipped.split(/\r?\n/);
-    if (lines.length > 1) {
-      for (const line of lines) {
-        if (!line || !contextTerms.test(line)) continue;
-
-        try {
-          const parsedLine = JSON.parse(line);
-          const reading =
-            inspectCandidateValue(parsedLine, source, ownerConversationId) ||
-            parseStructuredValue(parsedLine, source);
-          if (reading) return withConversationId(reading, reading.conversationId || ownerConversationId);
-        } catch {
-          const lineReading = parseTextForReading(line, source);
-          if (lineReading) return withConversationId(lineReading, ownerConversationId);
-        }
-      }
-    }
-
-    try {
-      const parsed = JSON.parse(clipped);
-      const reading = inspectCandidateValue(parsed, source, ownerConversationId) || parseStructuredValue(parsed, source);
-      return withConversationId(reading, reading && reading.conversationId ? reading.conversationId : ownerConversationId);
-    } catch {
-      return null;
-    }
-  }
-
-  // 捕获层会先缓存非当前会话读数，只有会话匹配时才推动当前 UI 刷新。
-  function acceptReading(reading) {
-    if (!reading) return;
-
-    const activeConversationId = state.activeConversationId || readActiveConversationId();
-    if (reading.conversationId) {
-      state.readingsByConversationId.set(reading.conversationId, reading);
-    }
-
-    if (activeConversationId && reading.conversationId && !conversationIdsMatch(activeConversationId, reading.conversationId)) {
-      return;
-    }
-
-    state.lastReading = reading;
-    scheduleUpdate(CAPTURE_UPDATE_DELAY_MS);
-  }
-
-  function inspectCandidateText(text, source, ownerConversationId) {
-    if (!text || text.length > MAX_CAPTURE_TEXT_LENGTH) return;
-    if (!CAPTURE_TEXT_HINT_RE.test(text)) return;
-
-    acceptReading(parsePayloadText(text, source, ownerConversationId));
-  }
-
-  function hasCaptureHintText(text) {
-    if (typeof text !== "string" || text.length > MAX_CAPTURE_TEXT_LENGTH) return false;
-    return CAPTURE_TEXT_HINT_RE.test(text);
-  }
-
-  function getRequestConversationId(input) {
-    const direct = normalizeConversationId(input && (input.url || input.href || input));
-    if (direct) return direct;
-
-    return state.activeConversationId || readActiveConversationId();
-  }
-
-  function getNativeFetch(captureState) {
-    return captureState.nativeFetch || window.fetch;
-  }
-
-  function getNativeWebSocket(captureState) {
-    return captureState.NativeWebSocket || window.WebSocket;
-  }
-
-  // fetch 捕获只 clone 小体积文本响应，不消费原 response，避免影响 Codex 自己的请求链。
-  function installFetchCapture() {
-    const captureState = getCaptureState();
-    if (captureState.fetchVersion === SCRIPT_VERSION || typeof window.fetch !== "function") return;
-
-    const originalFetch = getNativeFetch(captureState);
-    captureState.nativeFetch = originalFetch;
-    window.fetch = function codexContextMeterFetch(...args) {
-      const requestConversationId = getRequestConversationId(args[0]);
-      return originalFetch.apply(this, args).then((response) => {
-        try {
-          const urlText = String(args[0] && (args[0].url || args[0].href || args[0]) || response.url || "");
-          if (urlText && !CAPTURE_TEXT_HINT_RE.test(urlText)) return response;
-
-          const contentType = response.headers && response.headers.get("content-type");
-          const contentLength = response.headers && Number(response.headers.get("content-length"));
-          const isTextLike = !contentType || /json|text|event-stream|x-ndjson/i.test(contentType);
-          if (isTextLike && (!Number.isFinite(contentLength) || contentLength <= MAX_CAPTURE_TEXT_LENGTH)) {
-            response
-              .clone()
-              .text()
-              .then((text) => {
-                const currentCaptureState = window[CAPTURE_STATE_KEY];
-                if (currentCaptureState && typeof currentCaptureState.inspectText === "function") {
-                  currentCaptureState.inspectText(text, "fetch", requestConversationId);
-                }
-              })
-              .catch(() => {});
-          }
-        } catch {
-          return response;
-        }
-
-        return response;
-      });
-    };
-
-    captureState.fetchVersion = SCRIPT_VERSION;
-    window.__codexContextMeterFetchPatched = true;
-  }
-
-  // WebSocket 构造器需要保留原型和 readyState 常量，减少对页面侧类型判断的影响。
-  function installWebSocketCapture() {
-    const captureState = getCaptureState();
-    if (captureState.webSocketVersion === SCRIPT_VERSION || typeof window.WebSocket !== "function") return;
-
-    const NativeWebSocket = getNativeWebSocket(captureState);
-    captureState.NativeWebSocket = NativeWebSocket;
-
-    function MeterWebSocket(...args) {
-      const socket = new NativeWebSocket(...args);
-      socket.addEventListener("message", (event) => {
-        try {
-          if (typeof event.data === "string") {
-            if (!hasCaptureHintText(event.data)) return;
-
-            const currentCaptureState = window[CAPTURE_STATE_KEY];
-            if (currentCaptureState && typeof currentCaptureState.inspectText === "function") {
-              currentCaptureState.inspectText(event.data, "websocket", state.activeConversationId || readActiveConversationId());
-            }
-          } else if (event.data instanceof Blob && event.data.size <= MAX_CAPTURE_TEXT_LENGTH) {
-            event.data
-              .text()
-              .then((text) => {
-                const currentCaptureState = window[CAPTURE_STATE_KEY];
-                if (currentCaptureState && typeof currentCaptureState.inspectText === "function") {
-                  currentCaptureState.inspectText(text, "websocket", state.activeConversationId || readActiveConversationId());
-                }
-              })
-              .catch(() => {});
-          }
-        } catch {
-          return;
-        }
-      });
-      return socket;
-    }
-
-    MeterWebSocket.prototype = NativeWebSocket.prototype;
-    MeterWebSocket.CONNECTING = NativeWebSocket.CONNECTING;
-    MeterWebSocket.OPEN = NativeWebSocket.OPEN;
-    MeterWebSocket.CLOSING = NativeWebSocket.CLOSING;
-    MeterWebSocket.CLOSED = NativeWebSocket.CLOSED;
-    window.WebSocket = MeterWebSocket;
-    captureState.webSocketVersion = SCRIPT_VERSION;
-    window.__codexContextMeterWebSocketPatched = true;
-  }
-
-  // postMessage 监听器每次重装前先移除旧实例，支持 Codex++ 反复重新加载用户脚本。
-  function installPostMessageCapture() {
-    const captureState = getCaptureState();
-    if (captureState.messageListener) {
-      window.removeEventListener("message", captureState.messageListener, true);
-    }
-
-    captureState.messageListener = (event) => {
-      try {
-        const currentCaptureState = window[CAPTURE_STATE_KEY];
-        if (!currentCaptureState) return;
-
-        const reading =
-          (typeof currentCaptureState.inspectValue === "function"
-            ? currentCaptureState.inspectValue(event.data, "message", state.activeConversationId || readActiveConversationId())
-            : null) ||
-          (hasCaptureHintText(event.data) && typeof currentCaptureState.parsePayloadText === "function"
-            ? currentCaptureState.parsePayloadText(event.data, "message", state.activeConversationId || readActiveConversationId())
-            : null);
-
-        if (typeof currentCaptureState.acceptReading === "function") {
-          currentCaptureState.acceptReading(reading);
-        }
-      } catch {
-        return;
-      }
-    };
-
-    window.addEventListener("message", captureState.messageListener, true);
-    captureState.messageVersion = SCRIPT_VERSION;
-    window.__codexContextMeterPostMessagePatched = true;
-  }
-
-  function parseTextForReading(text, source) {
-    const clipped = String(text || "").slice(0, MAX_TEXT_LENGTH);
-    return (
-      parseStatusContextText(clipped, source) ||
-      parsePercentText(clipped, source) ||
-      parseRatioText(clipped, source) ||
-      parseStructuredText(clipped, source)
     );
   }
 
@@ -3443,7 +3247,8 @@
   // 兜底读取已渲染的 /status 输出；排除会话正文，避免把用户消息里的 Context 行当成状态。
   function collectStatusCommandText() {
     const chunks = [];
-    const walker = document.createTreeWalker(document.body || document.documentElement, NodeFilter.SHOW_ELEMENT);
+    const root = document.querySelector("main") || document.body || document.documentElement;
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT);
     let visited = 0;
     let node = walker.nextNode();
 
@@ -3465,162 +3270,6 @@
     }
 
     return chunks.join("\n");
-  }
-
-  function collectDomText() {
-    const parts = [];
-    let scanned = 0;
-
-    const attrNodes = document.querySelectorAll("[aria-label], [title], [data-testid], [data-test-id]");
-    for (const node of attrNodes) {
-      if (scanned >= DOM_ATTRIBUTE_SCAN_LIMIT || parts.length >= DOM_TEXT_PART_LIMIT) break;
-      scanned += 1;
-      if (node.closest(`#${ROOT_ID}`)) continue;
-
-      for (const attr of ["aria-label", "title", "data-testid", "data-test-id"]) {
-        const value = node.getAttribute(attr);
-        if (value && contextTerms.test(value)) parts.push(value);
-      }
-
-      const text = (node.textContent || "").trim();
-      if (text && text.length <= 500 && contextTerms.test(text)) {
-        parts.push(text);
-      }
-    }
-
-    return parts.join("\n").slice(0, MAX_TEXT_LENGTH);
-  }
-
-  function safeStorageText(storage) {
-    const parts = [];
-    for (let index = 0; index < storage.length && parts.length < 80; index += 1) {
-      const key = storage.key(index);
-      if (!key || !contextTerms.test(key)) continue;
-
-      let value = "";
-      try {
-        value = storage.getItem(key) || "";
-      } catch {
-        value = "";
-      }
-      parts.push(`${key}: ${value.slice(0, 4000)}`);
-    }
-    return parts.join("\n");
-  }
-
-  function collectValueText(value, depth, seen, parts) {
-    if (parts.length > 160 || depth < 0 || value == null) return;
-
-    const valueType = typeof value;
-    if (valueType === "string" || valueType === "number" || valueType === "boolean") {
-      const text = String(value);
-      if (contextTerms.test(text)) parts.push(text);
-      return;
-    }
-
-    if (valueType !== "object") return;
-    if (seen.has(value)) return;
-    seen.add(value);
-
-    if (Array.isArray(value)) {
-      const limit = Math.min(value.length, 80);
-      for (let index = 0; index < limit; index += 1) {
-        collectValueText(value[index], depth - 1, seen, parts);
-      }
-      return;
-    }
-
-    if (value instanceof Map) {
-      let index = 0;
-      for (const [mapKey, mapValue] of value) {
-        if (index >= 80) break;
-        collectValueText(mapKey, depth - 1, seen, parts);
-        collectValueText(mapValue, depth - 1, seen, parts);
-        index += 1;
-      }
-      return;
-    }
-
-    if (value instanceof Set) {
-      let index = 0;
-      for (const setValue of value) {
-        if (index >= 80) break;
-        collectValueText(setValue, depth - 1, seen, parts);
-        index += 1;
-      }
-      return;
-    }
-
-    const keys = getContextValueKeys(value);
-
-    for (const key of keys) {
-      let child;
-      try {
-        child = value[key];
-      } catch {
-        continue;
-      }
-
-      if (child == null || typeof child !== "object") {
-        parts.push(`${key}: ${String(child)}`);
-      } else {
-        parts.push(key);
-      }
-
-      if (typeof child === "object") {
-        collectValueText(child, depth - 1, seen, parts);
-      }
-    }
-  }
-
-  // window 全局对象很大，先缓存候选 key；只有主路径失败时才读取这些值。
-  function scanLikelyWindowState() {
-    const parts = [];
-    const seen = new WeakSet();
-    const now = Date.now();
-    if (!state.windowContextTextKeys || now - state.windowContextTextKeysAt > WINDOW_KEY_CACHE_MS) {
-      state.windowContextTextKeys = Object.keys(window).filter((key) => contextTerms.test(key));
-      state.windowContextTextKeysAt = now;
-    }
-
-    for (const key of state.windowContextTextKeys) {
-      let value;
-      try {
-        value = window[key];
-      } catch {
-        continue;
-      }
-
-      parts.push(key);
-      collectValueText(value, 3, seen, parts);
-    }
-
-    return parts.join("\n").slice(0, MAX_TEXT_LENGTH);
-  }
-
-  // React 兜底只检查可能承载线程/消息状态的宿主节点，避免遍历全部 body 元素。
-  function scanReactProps() {
-    const parts = [];
-    const seen = new WeakSet();
-    const root = document.getElementById("root");
-    const nodes = root ? root.querySelectorAll(REACT_STATE_HOST_SELECTOR) : [];
-    const limit = Math.min(nodes.length, REACT_HOST_SCAN_LIMIT);
-
-    for (let index = 0; index < limit && parts.length < 160; index += 1) {
-      const node = nodes[index];
-      const keys = getReactPrivateKeys(node);
-      for (const key of keys) {
-        let value;
-        try {
-          value = node[key];
-        } catch {
-          continue;
-        }
-        collectValueText(value, 4, seen, parts);
-      }
-    }
-
-    return parts.join("\n").slice(0, MAX_TEXT_LENGTH);
   }
 
   // 这里直接找结构化 usage 对象，比把 window 状态拼成文本再正则解析更便宜。
@@ -3649,7 +3298,7 @@
     return null;
   }
 
-  // 读取顺序按稳定性排列：app signal > React 状态 > window 缓存 > /status 文本 > storage/DOM 兜底。
+  // 读取顺序按稳定性排列：app signal > 结构化 React 状态 > window 缓存 > /status 文本兜底。
   function detectReading() {
     state.scanGeneration += 1;
     const activeConversationId = updateActiveConversationId();
@@ -3702,18 +3351,24 @@
       return state.lastReading;
     }
 
-    const statusReactReading = scanStatusReactContextUsage(activeConversationId);
-    if (statusReactReading) {
-      state.switchRetryUntil = 0;
-      clearRetryUpdate();
-      return statusReactReading;
+    const appSignalRecentlyWorked =
+      conversationIdsMatch(activeConversationId, state.appSignalCachedConversationId) &&
+      now - state.appSignalLastSuccessAt < SLOW_SCAN_INTERVAL_MS;
+
+    if (!appSignalRecentlyWorked || inSwitchRetryWindow) {
+      const statusReactReading = scanStatusReactContextUsage(activeConversationId);
+      if (statusReactReading) {
+        state.switchRetryUntil = 0;
+        clearRetryUpdate();
+        return statusReactReading;
+      }
     }
 
-    if (canRunExpensiveFallback) {
+    if (canRunExpensiveFallback && (!appSignalRecentlyWorked || inSwitchRetryWindow)) {
       state.expensiveFallbackScannedAt = now;
       state.expensiveFallbackConversationId = activeConversationId;
 
-      // 以下 fallback 从“结构化且便宜”逐步降级到“文本化且昂贵”，顺序不要随意调换。
+      // 以下 fallback 只保留结构化对象和 /status 明确格式，避免全页文本猜测。
       const windowReading = scanWindowForContextUsage(activeConversationId);
       if (windowReading) {
         state.switchRetryUntil = 0;
@@ -3721,39 +3376,12 @@
         return windowReading;
       }
 
-      const statusReading = parseTextForReading(collectStatusCommandText(), "status");
+      const statusReading = parseStatusContextText(collectStatusCommandText(), "status");
       if (statusReading) {
         state.switchRetryUntil = 0;
         clearRetryUpdate();
         return statusReading;
       }
-
-      const localReading = parseTextForReading(safeStorageText(localStorage), "localStorage");
-      if (localReading) {
-        state.switchRetryUntil = 0;
-        clearRetryUpdate();
-        return localReading;
-      }
-
-      const sessionReading = parseTextForReading(safeStorageText(sessionStorage), "sessionStorage");
-      if (sessionReading) {
-        state.switchRetryUntil = 0;
-        clearRetryUpdate();
-        return sessionReading;
-      }
-
-      const domReading = parseTextForReading(collectDomText(), "dom");
-      if (domReading) {
-        state.switchRetryUntil = 0;
-        clearRetryUpdate();
-        return domReading;
-      }
-
-      const slowWindowReading = parseTextForReading(scanLikelyWindowState(), "window");
-      if (slowWindowReading) return slowWindowReading;
-
-      const reactReading = parseTextForReading(scanReactProps(), "react");
-      if (reactReading) return reactReading;
     }
 
     if (inSwitchRetryWindow) {
@@ -3781,9 +3409,9 @@
     const root = ensureRoot();
     state.uiConfig = readUiConfig();
     const contextCard = state.contextCard;
-    const value = state.value || root.querySelector(".ccm-value");
-    const fill = state.fill || root.querySelector(".ccm-fill");
-    const compressionZone = root.querySelector(".ccm-context-card .ccm-compression-zone");
+    const value = state.value;
+    const fill = state.fill;
+    const compressionZone = state.compressionZone;
     const reading = detectReading();
     const activeConversationId = state.activeConversationId || readActiveConversationId();
 
@@ -3863,7 +3491,7 @@
     if (contextCard.title !== title) contextCard.title = title;
     if (value.textContent !== text) value.textContent = text;
     if (fill.style.width !== width) fill.style.width = width;
-    const contextRing = contextCard.querySelector(".ccm-ring");
+    const contextRing = state.contextRing;
     if (contextRing) contextRing.style.setProperty("--ccm-ring-angle", `${displayPercent * 3.6}deg`);
     if (compressionZone && compressionZone.style.width !== compressionZoneWidth) {
       compressionZone.style.width = compressionZoneWidth;
@@ -3894,7 +3522,7 @@
     if (!conversationId) return;
 
     activateConversationId(conversationId, { pendingNavigation: true });
-    scheduleUpdate(CAPTURE_UPDATE_DELAY_MS);
+    scheduleUpdate(NAVIGATION_UPDATE_DELAY_MS);
   }
 
   function clearRetryUpdate() {
@@ -3911,6 +3539,26 @@
     }, SWITCH_RETRY_INTERVAL_MS);
   }
 
+  function restoreLegacyCaptureHooks() {
+    const captureState = window.__codexContextMeterCaptureState;
+    if (!captureState || typeof captureState !== "object") return;
+
+    if (captureState.nativeFetch && window.fetch !== captureState.nativeFetch) {
+      window.fetch = captureState.nativeFetch;
+    }
+    if (captureState.NativeWebSocket && window.WebSocket !== captureState.NativeWebSocket) {
+      window.WebSocket = captureState.NativeWebSocket;
+    }
+    if (captureState.messageListener) {
+      window.removeEventListener("message", captureState.messageListener, true);
+    }
+
+    delete window.__codexContextMeterCaptureState;
+    delete window.__codexContextMeterFetchPatched;
+    delete window.__codexContextMeterWebSocketPatched;
+    delete window.__codexContextMeterPostMessagePatched;
+  }
+
   function installObserver() {
     if (state.observer) return;
 
@@ -3921,7 +3569,7 @@
 
     state.observer = new MutationObserver((mutations) => {
       for (const mutation of mutations) {
-      const target = mutation.target && mutation.target.nodeType === Node.ELEMENT_NODE
+        const target = mutation.target && mutation.target.nodeType === Node.ELEMENT_NODE
           ? mutation.target
           : mutation.target && mutation.target.parentElement;
         if (shouldIgnoreMutationTarget(target)) continue;
@@ -3983,17 +3631,6 @@
       const style = document.getElementById(STYLE_ID);
       if (style) style.remove();
 
-      const captureState = window[CAPTURE_STATE_KEY];
-      if (captureState && captureState.messageListener) {
-        window.removeEventListener("message", captureState.messageListener, true);
-        delete captureState.messageListener;
-      }
-      if (captureState) {
-        delete captureState.fetchVersion;
-        delete captureState.webSocketVersion;
-        delete captureState.messageVersion;
-      }
-
       delete window[INSTALL_KEY];
       delete window[API_KEY];
     },
@@ -4005,15 +3642,14 @@
         animatedConversationIds: Array.from(state.lastAnimatedUsedByConversationId.keys()),
         hasAppSignalScope: isAppSignalScope(state.appSignalScope),
         hasAppSignalModules: !!state.appSignalModules,
+        appSignalTokenUsageSelectorExport: state.appSignalTokenUsageSelectorExport,
         providerSummary: state.providerSummary,
       };
     },
   };
 
+  restoreLegacyCaptureHooks();
   installStyle();
-  installFetchCapture();
-  installWebSocketCapture();
-  installPostMessageCapture();
   installProviderSummaryListener();
   updateMeter();
   installObserver();
