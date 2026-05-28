@@ -8,7 +8,7 @@
   const UI_STATE_STORAGE_KEY = "__codexContextMeterUiState";
   const PROVIDER_SUMMARY_KEY = "__codexContextMeterProviderSummary";
   const PROVIDER_SUMMARY_EVENT = "codex-context-meter-provider-summary";
-  const SCRIPT_VERSION = 87;
+  const SCRIPT_VERSION = 88;
   const UPDATE_INTERVAL_MS = 5000;
   const SLOW_SCAN_INTERVAL_MS = 30000;
   const SWITCH_RETRY_WINDOW_MS = 8000;
@@ -1042,17 +1042,18 @@
         if (!toolbarRoot) continue;
 
         const toolbarChildren = sortByLeft(visibleDirectChildren(toolbarRoot));
-        const providerGroup =
-          toolbarChildren.find(
-            (child) =>
-              hasVisibleInteractiveControl(child) &&
-              !hasClassToken(child, "shrink-0") &&
-              (hasClassToken(child, "flex-1") || hasClassToken(child, "min-w-0"))
-          ) ||
-          toolbarChildren.find((child) => hasVisibleInteractiveControl(child) && !hasClassToken(child, "shrink-0")) ||
-          toolbarRoot;
+        const providerGroup = toolbarChildren.find(
+          (child) =>
+            hasVisibleInteractiveControl(child) &&
+            !hasClassToken(child, "shrink-0") &&
+            (hasClassToken(child, "flex-1") || hasClassToken(child, "min-w-0"))
+        );
+        if (!providerGroup) continue;
         const before = firstVisibleChild(providerGroup);
         if (!before) continue;
+        const footerRect = footer.getBoundingClientRect();
+        const beforeRect = before.getBoundingClientRect();
+        if (beforeRect.left < footerRect.left + footerRect.width * 0.5) continue;
 
         return {
           parent: providerGroup,
@@ -1063,6 +1064,13 @@
       return null;
     };
     const findStructuralMountForControl = (control) => {
+      const footer = control.closest(".composer-footer");
+      if (footer) {
+        const footerRect = footer.getBoundingClientRect();
+        const controlRect = control.getBoundingClientRect();
+        if (controlRect.left < footerRect.left + footerRect.width * 0.5) return null;
+      }
+
       let current = control.parentElement;
       while (current && current !== document.body) {
         const rect = current.getBoundingClientRect();
