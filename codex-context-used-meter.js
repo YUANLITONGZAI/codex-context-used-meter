@@ -8,7 +8,7 @@
   const UI_STATE_STORAGE_KEY = "__codexContextMeterUiState";
   const PROVIDER_SUMMARY_KEY = "__codexContextMeterProviderSummary";
   const PROVIDER_SUMMARY_EVENT = "codex-context-meter-provider-summary";
-  const SCRIPT_VERSION = 84;
+  const SCRIPT_VERSION = 87;
   const UPDATE_INTERVAL_MS = 5000;
   const SLOW_SCAN_INTERVAL_MS = 30000;
   const SWITCH_RETRY_WINDOW_MS = 8000;
@@ -69,7 +69,6 @@
       },
     },
   };
-  const STATUS_TEXT_NODE_SCAN_LIMIT = 240;
   const CODEX_COMPOSER_SELECTOR = `[data-codex-composer="true"]`;
   const THREAD_COMPOSER_SELECTOR = `[data-thread-find-composer="true"]`;
   const CODEX_INTELLIGENCE_TRIGGER_SELECTOR = `[data-codex-intelligence-trigger="true"]`;
@@ -80,19 +79,12 @@
     `[data-thread-find-target="conversation"]`,
     THREAD_COMPOSER_SELECTOR,
     '[data-app-shell-main-content-layout*="thread"]',
-    '[class*="thread-edge"]',
-    '[class*="transcript"]',
-    '[data-testid*="thread"], [data-test-id*="thread"]',
-    '[data-testid*="conversation"], [data-test-id*="conversation"]',
   ].join(",");
   const REACT_STATE_HOST_SELECTOR = [
     "[data-app-action-sidebar-thread-id]",
     THREAD_COMPOSER_SELECTOR,
     CODEX_COMPOSER_SELECTOR,
     `[data-thread-find-target="conversation"]`,
-    "[data-testid*='thread' i]",
-    "[data-testid*='conversation' i]",
-    "[data-testid*='message' i]",
     "[data-message-author-role]",
     "main",
     "article",
@@ -100,8 +92,6 @@
   const CONVERSATION_CONTENT_SELECTOR = [
     `[data-thread-find-target]`,
     `[data-message-author-role]`,
-    `[data-testid*="conversation" i]`,
-    `[data-testid*="message" i]`,
     `article`,
   ].join(",");
   const INVALID_INLINE_MOUNT_SELECTOR = [
@@ -113,7 +103,6 @@
   const MESSAGE_MUTATION_SELECTOR = [
     `[data-thread-find-target]`,
     `[data-message-author-role]`,
-    `[data-testid*="message" i]`,
     `article`,
   ].join(",");
   const PREFERRED_STATUS_KEYS = [
@@ -1005,33 +994,30 @@
 
     const visibleDirectChildren = (node) =>
       Array.from(node.children || []).filter((child) => child.id !== ROOT_ID && isVisibleElement(child));
-    const buttonLikeCount = (node) =>
-      Array.from(node.querySelectorAll("button, [role='button']")).filter((child) => isVisibleElement(child)).length;
-    const nodeLabel = (node) =>
-      `${node.textContent || ""} ${node.getAttribute?.("aria-label") || ""} ${node.getAttribute?.("title") || ""} ${node.getAttribute?.("data-testid") || ""}`;
-    const isComposerAction = (node) =>
-      /send|submit|attach|upload|file|image|screenshot|voice|audio|mic|microphone|dictat/i.test(nodeLabel(node));
-    const looksLikeProviderModelControl = (node) => {
-      if (!node || node.id === ROOT_ID || !isVisibleElement(node)) return false;
-      if (node.closest("textarea, input, [contenteditable='true'], [role='textbox']")) return false;
-      if (isComposerAction(node)) return false;
-
-      const label = nodeLabel(node).trim();
-      if (/provider|model|gpt-|claude|gemini|codex|auto|standard|reason|thinking|high|medium|low|o[0-9]/i.test(label)) return true;
-      return /\S{2,}/.test(label) && Boolean(node.querySelector("button, [role='button'], [aria-haspopup], svg"));
-    };
-    const findProviderModelBefore = (toolbar) => {
-      const children = visibleDirectChildren(toolbar).sort(
+    const firstVisibleChild = (node) => visibleDirectChildren(node)[0] || null;
+    const classText = (node) => (typeof node?.className === "string" ? node.className : "");
+    const hasClassToken = (node, token) => classText(node).split(/\s+/).includes(token);
+    const sortByLeft = (nodes) =>
+      nodes.slice().sort(
         (left, right) => left.getBoundingClientRect().left - right.getBoundingClientRect().left
       );
-      return children.find(looksLikeProviderModelControl) || null;
+    const hasVisibleInteractiveControl = (node) =>
+      Array.from(
+        node.querySelectorAll(`button, [role='button'], [aria-haspopup], ${CODEX_INTELLIGENCE_TRIGGER_SELECTOR}`)
+      ).some((child) => child.id !== ROOT_ID && isVisibleElement(child));
+    const directChildOf = (parent, node) => {
+      let current = node;
+      while (current && current.parentElement && current.parentElement !== parent) {
+        current = current.parentElement;
+      }
+      return current && current.parentElement === parent ? current : null;
     };
     const isComposerArea = (node) => {
       const rect = node && node.getBoundingClientRect();
       if (!rect || rect.top < window.innerHeight * 0.45) return false;
       if (node.closest(CONVERSATION_CONTENT_SELECTOR)) return false;
-      if (node.closest("aside, nav, [data-app-action-sidebar-thread-id], [data-app-action-sidebar-thread-active], [class*='sidebar' i]")) return false;
-      if (node.closest("article, [data-message-author-role], [data-testid*='message' i], [data-testid*='conversation' i]")) return false;
+      if (node.closest("aside, nav, [data-app-action-sidebar-thread-id], [data-app-action-sidebar-thread-active]")) return false;
+      if (node.closest("article, [data-message-author-role]")) return false;
       if (!node.querySelector(`textarea, input, [contenteditable='true'], [role='textbox'], ${CODEX_COMPOSER_SELECTOR}`)) return false;
       return true;
     };
@@ -1043,71 +1029,57 @@
       }
       return null;
     };
-    const directChildOf = (parent, node) => {
-      let current = node;
-      while (current && current.parentElement && current.parentElement !== parent) {
-        current = current.parentElement;
-      }
-      return current && current.parentElement === parent ? current : null;
-    };
-    const findToolbarForButton = (button) => {
-      let current = button.parentElement;
-      while (current && current !== document.body) {
-        const rect = current.getBoundingClientRect();
-        if (rect.top < window.innerHeight * 0.45) break;
-        if (current.closest(CONVERSATION_CONTENT_SELECTOR)) break;
-        const children = visibleDirectChildren(current);
-        const hasModel = /gpt-|o[0-9]|auto|high|medium|low|standard|模型/i.test(current.textContent || "");
-        const hasSubmit = /send|提交|发送/i.test(current.textContent || "");
-        if (children.length >= 3 && buttonLikeCount(current) >= 2 && (hasModel || hasSubmit)) {
-          return current;
-        }
-        current = current.parentElement;
-      }
-      return button.parentElement || button;
-    };
-    const firstVisibleChild = (node) => visibleDirectChildren(node)[0] || null;
-    const classText = (node) => (typeof node?.className === "string" ? node.className : "");
     const findComposerFooterMount = () => {
       const footers = Array.from(document.querySelectorAll(".composer-footer"))
         .filter((footer) => isVisibleElement(footer) && footer.getBoundingClientRect().top > window.innerHeight * 0.45)
         .sort((left, right) => right.getBoundingClientRect().top - left.getBoundingClientRect().top);
 
       for (const footer of footers) {
-        const rightGroup = visibleDirectChildren(footer).find((child) => {
-          const className = classText(child);
-          if (!/justify-end/.test(className)) return false;
-          if (!child.querySelector("button, [role='button'], [aria-haspopup]")) return false;
-          return !/full access/i.test(nodeLabel(child));
-        });
-        if (!rightGroup) continue;
+        const footerChildren = sortByLeft(visibleDirectChildren(footer));
+        const toolbarRoot = footerChildren
+          .filter((child) => hasClassToken(child, "justify-end") && hasVisibleInteractiveControl(child))
+          .sort((left, right) => right.getBoundingClientRect().right - left.getBoundingClientRect().right)[0];
+        if (!toolbarRoot) continue;
 
+        const toolbarChildren = sortByLeft(visibleDirectChildren(toolbarRoot));
         const providerGroup =
-          visibleDirectChildren(rightGroup).find((child) => {
-            const className = classText(child);
-            if (!/justify-end/.test(className)) return false;
-            if (!child.querySelector("button, [role='button'], [aria-haspopup]")) return false;
-            return !isComposerAction(child);
-          }) || rightGroup;
+          toolbarChildren.find(
+            (child) =>
+              hasVisibleInteractiveControl(child) &&
+              !hasClassToken(child, "shrink-0") &&
+              (hasClassToken(child, "flex-1") || hasClassToken(child, "min-w-0"))
+          ) ||
+          toolbarChildren.find((child) => hasVisibleInteractiveControl(child) && !hasClassToken(child, "shrink-0")) ||
+          toolbarRoot;
+        const before = firstVisibleChild(providerGroup);
+        if (!before) continue;
+
         return {
           parent: providerGroup,
-          before: firstVisibleChild(providerGroup),
+          before,
         };
       }
 
       return null;
     };
-    const findToolbarForProviderModel = (control) => {
+    const findStructuralMountForControl = (control) => {
       let current = control.parentElement;
       while (current && current !== document.body) {
         const rect = current.getBoundingClientRect();
         if (rect.top < window.innerHeight * 0.45) break;
         if (current.closest(CONVERSATION_CONTENT_SELECTOR)) break;
-        const children = visibleDirectChildren(current);
-        if (children.length >= 2 && children.some(looksLikeProviderModelControl)) return current;
+        if (!current.closest(INVALID_INLINE_MOUNT_SELECTOR)) {
+          const before = directChildOf(current, control) || control;
+          if (before && before !== current && current.contains(before)) {
+            return {
+              parent: current,
+              before,
+            };
+          }
+        }
         current = current.parentElement;
       }
-      return control.parentElement || control;
+      return null;
     };
     const rememberMount = (mount) => {
       if (
@@ -1131,47 +1103,9 @@
     if (codexModelTrigger && isVisibleElement(codexModelTrigger)) {
       const bar = findComposerArea(codexModelTrigger);
       if (bar && isVisibleElement(bar) && isComposerArea(bar)) {
-        const toolbar = findToolbarForProviderModel(codexModelTrigger);
-        return rememberMount({
-          parent: toolbar,
-          before: directChildOf(toolbar, codexModelTrigger) || findProviderModelBefore(toolbar) || firstVisibleChild(toolbar),
-        });
+        const triggerMount = findStructuralMountForControl(codexModelTrigger);
+        if (triggerMount) return rememberMount(triggerMount);
       }
-    }
-
-    const providerModelControls = Array.from(document.querySelectorAll("button, [role='button'], [aria-haspopup]"))
-      .filter(looksLikeProviderModelControl)
-      .sort((left, right) => {
-        const leftRect = left.getBoundingClientRect();
-        const rightRect = right.getBoundingClientRect();
-        return rightRect.top - leftRect.top || leftRect.left - rightRect.left;
-      });
-    for (const control of providerModelControls) {
-      const bar = findComposerArea(control);
-      if (!bar || !isVisibleElement(bar) || !isComposerArea(bar)) continue;
-      const toolbar = findToolbarForProviderModel(control);
-      const before = directChildOf(toolbar, control) || findProviderModelBefore(toolbar) || firstVisibleChild(toolbar);
-      return rememberMount({
-        parent: toolbar,
-        before,
-      });
-    }
-
-    const sendButtons = Array.from(document.querySelectorAll("button, [role='button']"));
-    for (const button of sendButtons) {
-      if (!isVisibleElement(button) || button.closest(`#${ROOT_ID}`)) continue;
-      const text = `${button.textContent || ""} ${button.getAttribute("aria-label") || ""} ${button.getAttribute("title") || ""}`;
-      if (!/send|提交|发送/i.test(text)) continue;
-
-      const bar = findComposerArea(button);
-      if (!bar || !isVisibleElement(bar)) continue;
-      if (!isComposerArea(bar)) continue;
-      const toolbar = findToolbarForButton(button);
-      const providerModelBefore = findProviderModelBefore(toolbar);
-      return rememberMount({
-        parent: toolbar,
-        before: providerModelBefore || firstVisibleChild(toolbar),
-      });
     }
 
     state.inlineMountCache = null;
@@ -2678,43 +2612,6 @@
     return state.activeConversationId;
   }
 
-  // /status 输出格式的文本锚点；如果上游改了 Context 行文案，优先同步这里。
-  function parseStatusContextText(text, source) {
-    if (!text || !/\bContext\s*:/i.test(text)) return null;
-
-    const normalized = String(text).replace(/\s+/g, " ");
-    const statusPattern =
-      /\bContext\s*:\s*(\d{1,3}(?:\.\d+)?)\s*%\s*(left|remaining|used|full)?\s*\(\s*([\d,.]+)\s*([kKmM]?)\s*used\s*\/\s*([\d,.]+)\s*([kKmM]?)\s*\)/i;
-    const statusMatch = statusPattern.exec(normalized);
-
-    if (statusMatch) {
-      const reportedPercent = Number(statusMatch[1]);
-      const mode = String(statusMatch[2] || "left").toLowerCase();
-      const used = toNumber(statusMatch[3], statusMatch[4]);
-      const limit = toNumber(statusMatch[5], statusMatch[6]);
-
-      if (used != null && limit != null && limit > 0 && used >= 0 && used <= limit * 1.25) {
-        return makeReading((used / limit) * 100, source, statusMatch[0], used, limit);
-      }
-
-      if (Number.isFinite(reportedPercent)) {
-        const usedPercent = mode === "left" || mode === "remaining" ? 100 - reportedPercent : reportedPercent;
-        return makeReading(usedPercent, source, statusMatch[0]);
-      }
-    }
-
-    const leftPattern = /\bContext\s*:\s*(\d{1,3}(?:\.\d+)?)\s*%\s*(left|remaining)\b/i;
-    const leftMatch = leftPattern.exec(normalized);
-    if (leftMatch) {
-      const leftPercent = Number(leftMatch[1]);
-      if (Number.isFinite(leftPercent)) {
-        return makeReading(100 - leftPercent, source, leftMatch[0]);
-      }
-    }
-
-    return null;
-  }
-
   function parseStatusContextUsageObject(value, source, conversationId) {
     if (!value || typeof value !== "object") return null;
 
@@ -3244,34 +3141,6 @@
     return !!element.closest(MESSAGE_MUTATION_SELECTOR);
   }
 
-  // 兜底读取已渲染的 /status 输出；排除会话正文，避免把用户消息里的 Context 行当成状态。
-  function collectStatusCommandText() {
-    const chunks = [];
-    const root = document.querySelector("main") || document.body || document.documentElement;
-    const walker = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT);
-    let visited = 0;
-    let node = walker.nextNode();
-
-    while (node && visited < STATUS_TEXT_NODE_SCAN_LIMIT) {
-      visited += 1;
-      if (chunks.length >= 12) break;
-      const current = node;
-      node = walker.nextNode();
-
-      const text = (current.textContent || "").replace(/\s+/g, " ").trim();
-      if (text.length < 20 || text.length > 1800) continue;
-      if (!/\bStatus\b/i.test(text) || !/\bContext\s*:\s*\d{1,3}(?:\.\d+)?\s*%/i.test(text)) continue;
-      if (!/\bSession\s*:|\b5h limit\s*:|\b7d limit\s*:/i.test(text)) continue;
-      if (current.id === ROOT_ID || current.closest(`#${ROOT_ID}`)) continue;
-      if (isConversationContent(current)) continue;
-      if (!isVisibleElement(current)) continue;
-
-      chunks.push(text);
-    }
-
-    return chunks.join("\n");
-  }
-
   // 这里直接找结构化 usage 对象，比把 window 状态拼成文本再正则解析更便宜。
   function scanWindowForContextUsage(activeConversationId) {
     const seen = new WeakSet();
@@ -3298,7 +3167,7 @@
     return null;
   }
 
-  // 读取顺序按稳定性排列：app signal > 结构化 React 状态 > window 缓存 > /status 文本兜底。
+  // 读取顺序按稳定性排列：app signal > 结构化 React 状态 > window 缓存。
   function detectReading() {
     state.scanGeneration += 1;
     const activeConversationId = updateActiveConversationId();
@@ -3368,19 +3237,12 @@
       state.expensiveFallbackScannedAt = now;
       state.expensiveFallbackConversationId = activeConversationId;
 
-      // 以下 fallback 只保留结构化对象和 /status 明确格式，避免全页文本猜测。
+      // fallback 只保留结构化对象，避免按页面文案猜测。
       const windowReading = scanWindowForContextUsage(activeConversationId);
       if (windowReading) {
         state.switchRetryUntil = 0;
         clearRetryUpdate();
         return windowReading;
-      }
-
-      const statusReading = parseStatusContextText(collectStatusCommandText(), "status");
-      if (statusReading) {
-        state.switchRetryUntil = 0;
-        clearRetryUpdate();
-        return statusReading;
       }
     }
 
