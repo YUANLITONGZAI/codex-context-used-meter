@@ -8,9 +8,9 @@
   const UI_STATE_STORAGE_KEY = "__codexContextMeterUiState";
   const PROVIDER_SUMMARY_KEY = "__codexContextMeterProviderSummary";
   const PROVIDER_SUMMARY_EVENT = "codex-context-meter-provider-summary";
-  const SCRIPT_VERSION = 88;
+  const SCRIPT_VERSION = 90;
   const UPDATE_INTERVAL_MS = 5000;
-  const SLOW_SCAN_INTERVAL_MS = 30000;
+  const SLOW_SCAN_INTERVAL_MS = UPDATE_INTERVAL_MS;
   const SWITCH_RETRY_WINDOW_MS = 8000;
   const SWITCH_RETRY_INTERVAL_MS = 700;
   const NAVIGATION_PENDING_MS = 1500;
@@ -3179,8 +3179,6 @@
   function detectReading() {
     state.scanGeneration += 1;
     const activeConversationId = updateActiveConversationId();
-    const cachedReading = activeConversationId ? state.readingsByConversationId.get(activeConversationId) : null;
-    if (cachedReading) return cachedReading;
 
     if (!activeConversationId) {
       const appSignalReading = scanAppSignalContextUsage(null);
@@ -3194,24 +3192,15 @@
       return null;
     }
 
-    if (state.lastReading && state.lastReading.conversationId && conversationIdsMatch(activeConversationId, state.lastReading.conversationId)) {
-      return state.lastReading;
-    }
+    const cachedReading = state.readingsByConversationId.get(activeConversationId) || null;
+    const fallbackReading =
+      state.lastReading && state.lastReading.conversationId && conversationIdsMatch(activeConversationId, state.lastReading.conversationId)
+        ? state.lastReading
+        : cachedReading;
 
     const now = Date.now();
     const activeChangedSinceScan = activeConversationId !== state.lastScannedConversationId;
     const inSwitchRetryWindow = !!activeConversationId && now < state.switchRetryUntil;
-    if (!activeChangedSinceScan && !inSwitchRetryWindow && now - state.lastScanAt < SLOW_SCAN_INTERVAL_MS) {
-      return null;
-    }
-    // 会话切换初期允许快速兜底；同一会话内的昂贵扫描按窗口限频。
-    const canRunExpensiveFallback =
-      activeChangedSinceScan ||
-      !conversationIdsMatch(activeConversationId, state.expensiveFallbackConversationId) ||
-      now - state.expensiveFallbackScannedAt >= EXPENSIVE_FALLBACK_INTERVAL_MS;
-
-    state.lastScannedConversationId = activeConversationId;
-    state.lastScanAt = now;
 
     const appSignalReading = scanAppSignalContextUsage(activeConversationId);
     if (appSignalReading) {
@@ -3227,6 +3216,18 @@
       scheduleUpdate(APP_SIGNAL_IMPORT_GRACE_MS);
       return state.lastReading;
     }
+
+    if (!activeChangedSinceScan && !inSwitchRetryWindow && now - state.lastScanAt < SLOW_SCAN_INTERVAL_MS) {
+      return fallbackReading;
+    }
+    // 会话切换初期允许快速兜底；同一会话内的昂贵扫描按窗口限频。
+    const canRunExpensiveFallback =
+      activeChangedSinceScan ||
+      !conversationIdsMatch(activeConversationId, state.expensiveFallbackConversationId) ||
+      now - state.expensiveFallbackScannedAt >= EXPENSIVE_FALLBACK_INTERVAL_MS;
+
+    state.lastScannedConversationId = activeConversationId;
+    state.lastScanAt = now;
 
     const appSignalRecentlyWorked =
       conversationIdsMatch(activeConversationId, state.appSignalCachedConversationId) &&
@@ -3260,15 +3261,20 @@
       clearRetryUpdate();
     }
 
-    if (
-      !state.lastReading ||
-      !state.lastReading.conversationId ||
-      conversationIdsMatch(activeConversationId, state.lastReading.conversationId)
-    ) {
-      return state.lastReading;
-    }
+    if (fallbackReading) return fallbackReading;
 
     return null;
+  }
+
+  function rememberReading(reading, fallbackConversationId) {
+    if (!reading) return;
+
+    const conversationId = normalizeConversationId(reading.conversationId || fallbackConversationId);
+    if (conversationId) {
+      reading.conversationId = conversationId;
+      state.readingsByConversationId.set(conversationId, reading);
+    }
+    state.lastReading = reading;
   }
 
   function updateMeter() {
@@ -3310,7 +3316,7 @@
       return;
     }
 
-    state.lastReading = reading;
+    rememberReading(reading, activeConversationId);
 
     const leftPercent = clampPercent(100 - reading.percent);
     const showUsedInsteadOfLeft = shouldShowUsedInsteadOfLeft(state.uiConfig);
