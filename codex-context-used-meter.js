@@ -9,7 +9,7 @@
   const UI_STATE_STORAGE_KEY = "__codexContextMeterUiState";
   const PROVIDER_SUMMARY_KEY = "__codexContextMeterProviderSummary";
   const PROVIDER_SUMMARY_EVENT = "codex-context-meter-provider-summary";
-  const SCRIPT_VERSION = 97;
+  const SCRIPT_VERSION = 98;
   const UPDATE_INTERVAL_MS = 5000;
   const SLOW_SCAN_INTERVAL_MS = UPDATE_INTERVAL_MS;
   const CONTEXT_USAGE_BACKGROUND_SAMPLE_INTERVAL_MS = UPDATE_INTERVAL_MS;
@@ -1946,10 +1946,6 @@
         ? contextSessionTotal(conversationId)
         : providerSessionTotal(conversationId);
     if (!items.length) {
-      items = state.spendHistory[kind].slice();
-      total = items.reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
-    }
-    if (!items.length) {
       const snapshot = currentHistorySnapshot(kind, conversationId);
       if (snapshot) {
         items = [snapshot];
@@ -2770,6 +2766,7 @@
       state.navigationPendingUntil = options.pendingNavigation ? Date.now() + NAVIGATION_PENDING_MS : 0;
       state.switchRetryUntil = Date.now() + SWITCH_RETRY_WINDOW_MS;
       scheduleRetryUpdate();
+      refreshOpenSpendHistory();
       return true;
     }
 
