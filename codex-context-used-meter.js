@@ -9,7 +9,7 @@
   const UI_STATE_STORAGE_KEY = "__codexContextMeterUiState";
   const PROVIDER_SUMMARY_KEY = "__codexContextMeterProviderSummary";
   const PROVIDER_SUMMARY_EVENT = "codex-context-meter-provider-summary";
-  const SCRIPT_VERSION = 98;
+  const SCRIPT_VERSION = 99;
   const UPDATE_INTERVAL_MS = 5000;
   const SLOW_SCAN_INTERVAL_MS = UPDATE_INTERVAL_MS;
   const CONTEXT_USAGE_BACKGROUND_SAMPLE_INTERVAL_MS = UPDATE_INTERVAL_MS;
@@ -213,6 +213,7 @@
     inlineHost: null,
     inlineBefore: null,
     inlineMountCache: null,
+    inlineMountPending: false,
     inlineMountLookupAt: 0,
     uiState: DEFAULT_FLOATING_UI,
     contextMenu: null,
@@ -1222,6 +1223,7 @@
     state.uiState = readUiState();
     if (state.uiState.mode === "floating") {
       state.inlineMountCache = null;
+      state.inlineMountPending = false;
       if (root.parentNode !== document.body) document.body.appendChild(root);
       state.inlineHost = null;
       root.dataset.placement = "floating";
@@ -1235,9 +1237,13 @@
       state.inlineHost = null;
       state.inlineBefore = null;
       state.inlineMountCache = null;
+      state.inlineMountPending = true;
       if (root.parentNode !== document.body) document.body.appendChild(root);
-      root.dataset.placement = "floating";
+      root.dataset.placement = "inline";
+      root.hidden = true;
       applyFloatingUiState(root);
+      closeSpendHistory();
+      scheduleUpdate(SWITCH_RETRY_INTERVAL_MS);
       return;
     }
 
@@ -1248,6 +1254,7 @@
     state.inlineHost = mount.parent;
     state.inlineBefore = before;
     state.inlineMountCache = mount;
+    state.inlineMountPending = false;
     root.dataset.placement = "inline";
     applyFloatingUiState(root);
     refreshOpenSpendHistory(root);
@@ -2282,6 +2289,12 @@
   function updateDockVisibility(root) {
     const contextVisible = state.contextCard && !state.contextCard.hidden;
     const providerVisible = state.providerCard && !state.providerCard.hidden;
+    if (state.inlineMountPending && (state.uiState || readUiState()).mode !== "floating") {
+      root.hidden = true;
+      closeSpendHistory();
+      return;
+    }
+
     const hidden = !contextVisible && !providerVisible;
     const keepVisibleForSpend = hidden && hasPendingSpendEffects();
     root.hidden = hidden && !keepVisibleForSpend;
