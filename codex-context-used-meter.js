@@ -4,13 +4,16 @@
   const API_KEY = "__codexContextMeter";
   const STYLE_ID = "codex-context-meter-style";
   const ROOT_ID = "codex-context-meter";
+  const HISTORY_PORTAL_ID = "codex-context-meter-history-portal";
   const CONFIG_KEY = "__codexContextMeterConfig";
   const UI_STATE_STORAGE_KEY = "__codexContextMeterUiState";
   const PROVIDER_SUMMARY_KEY = "__codexContextMeterProviderSummary";
   const PROVIDER_SUMMARY_EVENT = "codex-context-meter-provider-summary";
-  const SCRIPT_VERSION = 90;
+  const SCRIPT_VERSION = 97;
   const UPDATE_INTERVAL_MS = 5000;
   const SLOW_SCAN_INTERVAL_MS = UPDATE_INTERVAL_MS;
+  const CONTEXT_USAGE_BACKGROUND_SAMPLE_INTERVAL_MS = UPDATE_INTERVAL_MS;
+  const CONTEXT_USAGE_BACKGROUND_SAMPLE_MAX_CONVERSATIONS = 32;
   const SWITCH_RETRY_WINDOW_MS = 8000;
   const SWITCH_RETRY_INTERVAL_MS = 700;
   const NAVIGATION_PENDING_MS = 1500;
@@ -36,7 +39,22 @@
   const CONTEXT_SPEND_DEDUPE_KEY = "__codexContextMeterContextSpendDedupe";
   const PROVIDER_SPEND_DEDUPE_WINDOW_MS = 1500;
   const PROVIDER_SPEND_DEDUPE_KEY = "__codexContextMeterProviderSpendDedupe";
-  const HISTORY_PANEL_CLOSE_DELAY_MS = 240;
+  const HISTORY_PANEL_VIEWPORT_PADDING = 8;
+  const HISTORY_PANEL_GAP = 8;
+  const HISTORY_PANEL_MIN_WIDTH = 240;
+  const HISTORY_PANEL_MIN_HEIGHT = 80;
+  const HISTORY_PORTAL_THEME_VARIABLES = [
+    "--ccm-card-value",
+    "--ccm-panel-border",
+    "--ccm-panel-bg",
+    "--ccm-panel-text",
+    "--ccm-panel-shadow",
+    "--ccm-muted-strong",
+    "--ccm-muted",
+    "--ccm-muted-soft",
+    "--ccm-axis-line",
+    "--ccm-gridline",
+  ];
   const FLOAT_DRAG_HOLD_MS = 260;
   const FLOAT_SCALE_MIN = 0.7;
   const FLOAT_SCALE_MAX = 1.8;
@@ -183,6 +201,7 @@
     contextCard: null,
     providerCard: null,
     historyPanel: null,
+    historyPortal: null,
     value: null,
     fill: null,
     compressionZone: null,
@@ -215,6 +234,8 @@
     providerSummaryListener: null,
     lastScanAt: 0,
     lastScannedConversationId: null,
+    contextUsageBackgroundSampleAt: 0,
+    contextUsageBackgroundSampleConversationIds: [],
     navigationPendingUntil: 0,
     switchRetryUntil: 0,
     retryTimer: 0,
@@ -365,8 +386,7 @@
       }
 
       #${ROOT_ID}[data-placement="inline"] .ccm-value,
-      #${ROOT_ID}[data-placement="inline"] .ccm-provider-value,
-      #${ROOT_ID}[data-placement="inline"] .ccm-history-panel {
+      #${ROOT_ID}[data-placement="inline"] .ccm-provider-value {
         display: none !important;
       }
 
@@ -384,6 +404,18 @@
       }
 
       #${ROOT_ID}[hidden] {
+        display: none !important;
+      }
+
+      #${HISTORY_PORTAL_ID} {
+        position: fixed;
+        inset: 0;
+        z-index: 2147483647;
+        pointer-events: none;
+        -webkit-app-region: no-drag;
+      }
+
+      #${HISTORY_PORTAL_ID}[hidden] {
         display: none !important;
       }
 
@@ -563,7 +595,7 @@
         right: 0;
       }
 
-      #${ROOT_ID} .ccm-history-panel {
+      #${HISTORY_PORTAL_ID} .ccm-history-panel {
         position: absolute;
         top: calc(100% + 8px);
         left: 0;
@@ -572,7 +604,9 @@
         box-sizing: border-box;
         width: max-content;
         min-width: 240px;
-        max-width: min(560px, calc(100vw - 32px));
+        max-width: min(560px, var(--ccm-history-max-width, calc(100vw - 32px)));
+        max-height: var(--ccm-history-max-height, calc(100vh - 16px));
+        overflow: hidden;
         padding: 9px 10px 10px;
         border: 1px solid var(--ccm-panel-border);
         border-radius: 8px;
@@ -589,7 +623,15 @@
         transition: opacity 140ms ease, transform 140ms ease, visibility 140ms ease;
       }
 
-      #${ROOT_ID} .ccm-history-panel::before {
+      #${HISTORY_PORTAL_ID} .ccm-history-panel {
+        position: fixed;
+        top: var(--ccm-history-top, 0px);
+        left: var(--ccm-history-left, 0px);
+        right: auto;
+        z-index: 2147483647;
+      }
+
+      #${HISTORY_PORTAL_ID} .ccm-history-panel::before {
         content: "";
         position: absolute;
         left: 0;
@@ -599,39 +641,39 @@
         pointer-events: auto;
       }
 
-      #${ROOT_ID}[data-history-open="true"] .ccm-history-panel {
+      #${HISTORY_PORTAL_ID}[data-history-open="true"] .ccm-history-panel {
         opacity: 1;
         transform: translateY(0);
         pointer-events: auto;
         visibility: visible;
       }
 
-      #${ROOT_ID} .ccm-history-grid {
+      #${HISTORY_PORTAL_ID} .ccm-history-grid {
         display: grid;
         grid-template-columns: minmax(0, 260px) minmax(0, 260px);
         gap: 12px;
       }
 
-      #${ROOT_ID} .ccm-history-grid[data-provider-visible="false"] {
+      #${HISTORY_PORTAL_ID} .ccm-history-grid[data-provider-visible="false"] {
         grid-template-columns: minmax(0, 292px);
       }
 
-      #${ROOT_ID} .ccm-history-section {
+      #${HISTORY_PORTAL_ID} .ccm-history-section {
         min-width: 0;
         --ccm-history-accent: #38bdf8;
         --ccm-history-fill: rgba(56, 189, 248, 0.12);
       }
 
-      #${ROOT_ID} .ccm-history-section[data-history-kind="provider"] {
+      #${HISTORY_PORTAL_ID} .ccm-history-section[data-history-kind="provider"] {
         --ccm-history-accent: #f97316;
         --ccm-history-fill: rgba(249, 115, 22, 0.12);
       }
 
-      #${ROOT_ID} .ccm-history-section[hidden] {
+      #${HISTORY_PORTAL_ID} .ccm-history-section[hidden] {
         display: none !important;
       }
 
-      #${ROOT_ID} .ccm-history-head {
+      #${HISTORY_PORTAL_ID} .ccm-history-head {
         display: flex;
         align-items: baseline;
         justify-content: space-between;
@@ -640,54 +682,54 @@
         white-space: nowrap;
       }
 
-      #${ROOT_ID} .ccm-history-title {
+      #${HISTORY_PORTAL_ID} .ccm-history-title {
         color: var(--ccm-card-value);
         font-weight: 700;
       }
 
-      #${ROOT_ID} .ccm-history-total {
+      #${HISTORY_PORTAL_ID} .ccm-history-total {
         color: var(--ccm-muted-strong);
         font-variant-numeric: tabular-nums;
       }
 
-      #${ROOT_ID} .ccm-history-chart {
+      #${HISTORY_PORTAL_ID} .ccm-history-chart {
         position: relative;
         width: 100%;
         min-height: 78px;
       }
 
-      #${ROOT_ID} .ccm-history-svg {
+      #${HISTORY_PORTAL_ID} .ccm-history-svg {
         display: block;
         width: 100%;
         height: 78px;
         overflow: visible;
       }
 
-      #${ROOT_ID} .ccm-history-axis-line {
+      #${HISTORY_PORTAL_ID} .ccm-history-axis-line {
         fill: none;
         stroke: var(--ccm-axis-line);
         stroke-width: 1;
         vector-effect: non-scaling-stroke;
       }
 
-      #${ROOT_ID} .ccm-history-axis-label {
+      #${HISTORY_PORTAL_ID} .ccm-history-axis-label {
         fill: var(--ccm-muted-soft);
         font-size: 10px;
         font-variant-numeric: tabular-nums;
       }
 
-      #${ROOT_ID} .ccm-history-gridline {
+      #${HISTORY_PORTAL_ID} .ccm-history-gridline {
         fill: none;
         stroke: var(--ccm-gridline);
         stroke-dasharray: 2 4;
         stroke-width: 1;
       }
 
-      #${ROOT_ID} .ccm-history-area {
+      #${HISTORY_PORTAL_ID} .ccm-history-area {
         fill: var(--ccm-history-fill);
       }
 
-      #${ROOT_ID} .ccm-history-line {
+      #${HISTORY_PORTAL_ID} .ccm-history-line {
         fill: none;
         stroke: var(--ccm-history-accent);
         stroke-linecap: round;
@@ -696,18 +738,18 @@
         vector-effect: non-scaling-stroke;
       }
 
-      #${ROOT_ID} .ccm-history-point {
+      #${HISTORY_PORTAL_ID} .ccm-history-point {
         fill: #fff7ed;
         stroke: var(--ccm-history-accent);
         stroke-width: 1.5;
       }
 
-      #${ROOT_ID} .ccm-history-hit {
+      #${HISTORY_PORTAL_ID} .ccm-history-hit {
         fill: transparent;
         pointer-events: all;
       }
 
-      #${ROOT_ID} .ccm-history-caption {
+      #${HISTORY_PORTAL_ID} .ccm-history-caption {
         display: flex;
         align-items: center;
         justify-content: space-between;
@@ -719,7 +761,7 @@
         white-space: nowrap;
       }
 
-      #${ROOT_ID} .ccm-history-empty {
+      #${HISTORY_PORTAL_ID} .ccm-history-empty {
         position: absolute;
         inset: 19px 0 auto 0;
         color: var(--ccm-muted-soft);
@@ -874,7 +916,8 @@
     state.root = root;
     state.contextCard = root.querySelector(".ccm-context-card");
     state.providerCard = root.querySelector(".ccm-provider-card");
-    state.historyPanel = root.querySelector(".ccm-history-panel");
+    state.historyPortal = document.getElementById(HISTORY_PORTAL_ID);
+    state.historyPanel = state.historyPortal?.querySelector(".ccm-history-panel") || null;
     state.value = root.querySelector(".ccm-value");
     state.fill = root.querySelector(".ccm-fill");
     state.compressionZone = root.querySelector(".ccm-compression-zone");
@@ -896,13 +939,85 @@
       state.providerCard &&
       state.providerValue &&
       state.providerFill &&
-      state.providerRing
+      state.providerRing &&
+      state.historyPortal &&
+      state.historyPanel
     );
   }
 
+  function historyPanelMarkup() {
+    return `
+      <div class="ccm-history-panel" aria-hidden="true">
+        <div class="ccm-history-grid">
+          <div class="ccm-history-section" data-history-kind="context">
+            <div class="ccm-history-head">
+              <span class="ccm-history-title">Context / Session</span>
+              <span class="ccm-history-total">--</span>
+            </div>
+            <div class="ccm-history-chart"></div>
+          </div>
+          <div class="ccm-history-section" data-history-kind="provider">
+            <div class="ccm-history-head">
+              <span class="ccm-history-title">Provider / Session</span>
+              <span class="ccm-history-total">--</span>
+            </div>
+            <div class="ccm-history-chart"></div>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  function syncHistoryPortalTheme(root) {
+    const portal = state.historyPortal || document.getElementById(HISTORY_PORTAL_ID);
+    if (!root || !portal) return;
+
+    portal.dataset.theme = root.dataset.theme === "light" ? "light" : "dark";
+    const computed = getComputedStyle(root);
+    for (const name of HISTORY_PORTAL_THEME_VARIABLES) {
+      const value = computed.getPropertyValue(name);
+      if (value) portal.style.setProperty(name, value.trim());
+    }
+  }
+
+  function ensureHistoryPortal(root) {
+    let portal = state.historyPortal && state.historyPortal.isConnected
+      ? state.historyPortal
+      : document.getElementById(HISTORY_PORTAL_ID);
+    if (!portal) {
+      portal = document.createElement("div");
+      portal.id = HISTORY_PORTAL_ID;
+      portal.dataset.historyOpen = "false";
+      document.body.appendChild(portal);
+    } else if (portal.parentNode !== document.body) {
+      document.body.appendChild(portal);
+    }
+
+    if (portal.dataset.infrastructureVersion !== String(SCRIPT_VERSION)) {
+      portal.innerHTML = historyPanelMarkup();
+      portal.dataset.infrastructureVersion = String(SCRIPT_VERSION);
+    }
+
+    state.historyPortal = portal;
+    state.historyPanel = portal.querySelector(".ccm-history-panel");
+    if (root && portal.dataset.historyOpen !== root.dataset.historyOpen) {
+      portal.dataset.historyOpen = root.dataset.historyOpen === "true" ? "true" : "false";
+    }
+    if (state.historyPanel) {
+      state.historyPanel.setAttribute(
+        "aria-hidden",
+        portal.dataset.historyOpen === "true" ? "false" : "true",
+      );
+    }
+    syncHistoryPortalTheme(root);
+    return portal;
+  }
+
   function ensureRootInfrastructure(root) {
+    ensureHistoryPortal(root);
     if (root.dataset.infrastructureVersion !== String(SCRIPT_VERSION)) {
       root.querySelector(".ccm-hover-zone")?.remove();
+      root.querySelector(".ccm-history-panel")?.remove();
       const contextTrack = root.querySelector(".ccm-context-card .ccm-track");
       if (contextTrack && !contextTrack.querySelector(".ccm-compression-zone")) {
         contextTrack.insertBefore(document.createElement("div"), contextTrack.firstChild);
@@ -929,6 +1044,7 @@
     let root = state.root && state.root.isConnected ? state.root : document.getElementById(ROOT_ID);
     if (root) {
       ensureRootInfrastructure(root);
+      state.uiState = readUiState();
       if (!isInlineMountCurrent(root)) mountRoot(root);
       return root;
     }
@@ -953,24 +1069,6 @@
         </div>
         <div class="ccm-track">
           <div class="ccm-fill ccm-provider-fill"></div>
-        </div>
-      </div>
-      <div class="ccm-history-panel" aria-hidden="true">
-        <div class="ccm-history-grid">
-          <div class="ccm-history-section" data-history-kind="context">
-            <div class="ccm-history-head">
-              <span class="ccm-history-title">Context / Session</span>
-              <span class="ccm-history-total">--</span>
-            </div>
-            <div class="ccm-history-chart"></div>
-          </div>
-          <div class="ccm-history-section" data-history-kind="provider">
-            <div class="ccm-history-head">
-              <span class="ccm-history-title">Provider / Session</span>
-              <span class="ccm-history-total">--</span>
-            </div>
-            <div class="ccm-history-chart"></div>
-          </div>
         </div>
       </div>
     `;
@@ -1128,6 +1226,7 @@
       state.inlineHost = null;
       root.dataset.placement = "floating";
       applyFloatingUiState(root);
+      refreshOpenSpendHistory(root);
       return;
     }
 
@@ -1151,6 +1250,7 @@
     state.inlineMountCache = mount;
     root.dataset.placement = "inline";
     applyFloatingUiState(root);
+    refreshOpenSpendHistory(root);
   }
 
   function applyFloatingUiState(root) {
@@ -1160,6 +1260,7 @@
     root.style.setProperty("--ccm-float-scale", String(uiState.scale));
     root.dataset.floatingLayout = uiState.floatingLayout === "vertical" ? "vertical" : "horizontal";
     root.dataset.theme = uiState.theme === "light" ? "light" : "dark";
+    syncHistoryPortalTheme(root);
   }
 
   function setUiMode(mode) {
@@ -1213,6 +1314,7 @@
     if (!root || !root.contains(event.target)) return;
     event.preventDefault();
     closeContextMenu();
+    state.uiState = readUiState();
 
     const currentMode = (state.uiState && state.uiState.mode) === "floating" ? "floating" : "inline";
     const currentFloatingLayout =
@@ -1615,6 +1717,45 @@
     return lines.join("\n");
   }
 
+  function currentContextHistorySnapshot(conversationId) {
+    const reading = state.lastReading;
+    if (!reading || !conversationIdsMatch(reading.conversationId, conversationId)) return null;
+    const used = Number(reading.used);
+    if (!Number.isFinite(used) || used <= 0) return null;
+
+    return {
+      time: Date.now(),
+      amount: used,
+      conversationId: normalizeConversationId(conversationId || reading.conversationId || "__unknown__") || "__unknown__",
+      meta: "Current used",
+    };
+  }
+
+  function currentProviderHistorySnapshot(conversationId) {
+    const provider = pickProviderSummary(readProviderSummary());
+    if (!provider) return null;
+
+    const remainingAmount = Number(provider.remainingAmount);
+    const totalAmount = Number(provider.totalAmount);
+    const usedAmount = Number.isFinite(Number(provider.usedAmount))
+      ? Number(provider.usedAmount)
+      : totalAmount - remainingAmount;
+    if (!Number.isFinite(usedAmount) || usedAmount <= 0) return null;
+
+    return {
+      time: Date.now(),
+      amount: usedAmount,
+      conversationId: normalizeConversationId(conversationId || "__unknown__") || "__unknown__",
+      meta: String(provider.displayName || provider.id || "Current used"),
+    };
+  }
+
+  function currentHistorySnapshot(kind, conversationId) {
+    return kind === "context"
+      ? currentContextHistorySnapshot(conversationId)
+      : currentProviderHistorySnapshot(conversationId);
+  }
+
   function svgPoint(value) {
     return Number.isFinite(value) ? value.toFixed(1) : "0.0";
   }
@@ -1796,14 +1937,25 @@
 
     pruneSpendHistory();
     const conversationId = metaConversationId();
-    const items = state.spendHistory[kind].filter((item) => {
+    let items = state.spendHistory[kind].filter((item) => {
       const itemConversationId = normalizeConversationId(item.conversationId || "__unknown__") || "__unknown__";
       return itemConversationId === conversationId;
     });
-    const total =
+    let total =
       kind === "context"
         ? contextSessionTotal(conversationId)
         : providerSessionTotal(conversationId);
+    if (!items.length) {
+      items = state.spendHistory[kind].slice();
+      total = items.reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
+    }
+    if (!items.length) {
+      const snapshot = currentHistorySnapshot(kind, conversationId);
+      if (snapshot) {
+        items = [snapshot];
+        total = snapshot.amount;
+      }
+    }
     const totalNode = section.querySelector(".ccm-history-total");
     const chart = section.querySelector(".ccm-history-chart");
     if (totalNode) totalNode.textContent = total > 0 ? formatHistoryDelta(kind, total) : "--";
@@ -1835,6 +1987,55 @@
     renderHistorySection("provider");
   }
 
+  function clampHistoryPanelToViewport(root) {
+    const panel = state.historyPanel;
+    if (!root || !panel) return;
+
+    const viewportWidth = window.innerWidth || document.documentElement.clientWidth || 0;
+    const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 0;
+    if (viewportWidth <= 0 || viewportHeight <= 0) return;
+
+    const maxWidth = Math.max(
+      HISTORY_PANEL_MIN_WIDTH,
+      viewportWidth - HISTORY_PANEL_VIEWPORT_PADDING * 2,
+    );
+    const maxHeight = Math.max(
+      HISTORY_PANEL_MIN_HEIGHT,
+      viewportHeight - HISTORY_PANEL_VIEWPORT_PADDING * 2,
+    );
+    panel.style.setProperty("--ccm-history-max-width", `${maxWidth}px`);
+    panel.style.setProperty("--ccm-history-max-height", `${maxHeight}px`);
+
+    const anchor = state.contextCard && !state.contextCard.hidden
+      ? state.contextCard
+      : state.providerCard && !state.providerCard.hidden
+        ? state.providerCard
+        : root;
+    const anchorRect = anchor.getBoundingClientRect();
+    const panelRect = panel.getBoundingClientRect();
+    const panelWidth = Math.min(
+      Math.max(panelRect.width || HISTORY_PANEL_MIN_WIDTH, HISTORY_PANEL_MIN_WIDTH),
+      maxWidth,
+    );
+    const panelHeight = Math.min(
+      Math.max(panelRect.height || HISTORY_PANEL_MIN_HEIGHT, HISTORY_PANEL_MIN_HEIGHT),
+      maxHeight,
+    );
+    const left = clampNumber(
+      anchorRect.left,
+      HISTORY_PANEL_VIEWPORT_PADDING,
+      Math.max(HISTORY_PANEL_VIEWPORT_PADDING, viewportWidth - panelWidth - HISTORY_PANEL_VIEWPORT_PADDING),
+    );
+    const belowTop = anchorRect.bottom + HISTORY_PANEL_GAP;
+    const aboveTop = anchorRect.top - panelHeight - HISTORY_PANEL_GAP;
+    const top = belowTop + panelHeight + HISTORY_PANEL_VIEWPORT_PADDING <= viewportHeight
+      ? belowTop
+      : Math.max(HISTORY_PANEL_VIEWPORT_PADDING, aboveTop);
+
+    panel.style.setProperty("--ccm-history-left", `${Math.round(left)}px`);
+    panel.style.setProperty("--ccm-history-top", `${Math.round(top)}px`);
+  }
+
   function openSpendHistory() {
     const root = state.root;
     if (!root) return;
@@ -1842,13 +2043,23 @@
       closeSpendHistory();
       return;
     }
+    ensureHistoryPortal(root);
     if (state.historyCloseTimer) {
       window.clearTimeout(state.historyCloseTimer);
       state.historyCloseTimer = 0;
     }
     renderSpendHistory();
+    clampHistoryPanelToViewport(root);
     if (root.dataset.historyOpen !== "true") root.dataset.historyOpen = "true";
+    if (state.historyPortal) state.historyPortal.dataset.historyOpen = "true";
     if (state.historyPanel) state.historyPanel.setAttribute("aria-hidden", "false");
+  }
+
+  function refreshOpenSpendHistory(root = state.root) {
+    if (!root || root.dataset.historyOpen !== "true") return;
+    ensureHistoryPortal(root);
+    renderSpendHistory();
+    clampHistoryPanelToViewport(root);
   }
 
   function closeSpendHistory() {
@@ -1859,7 +2070,10 @@
       state.historyCloseTimer = 0;
     }
     if (root.dataset.historyOpen !== "false") root.dataset.historyOpen = "false";
-    if (state.historyPanel) state.historyPanel.setAttribute("aria-hidden", "true");
+    if (state.historyPortal) state.historyPortal.dataset.historyOpen = "false";
+    if (state.historyPanel) {
+      state.historyPanel.setAttribute("aria-hidden", "true");
+    }
   }
 
   function scheduleCloseSpendHistory(event) {
@@ -1868,15 +2082,8 @@
     const relatedTarget = event && event.relatedTarget;
     if (relatedTarget && typeof relatedTarget.nodeType === "number" && root.contains(relatedTarget)) return;
     if (state.historyCloseTimer) window.clearTimeout(state.historyCloseTimer);
-    state.historyCloseTimer = window.setTimeout(() => {
-      state.historyCloseTimer = 0;
-      if (root.matches(":hover")) return;
-      closeSpendHistory();
-    }, HISTORY_PANEL_CLOSE_DELAY_MS);
-  }
-
-  function rectContainsPoint(rect, x, y) {
-    return !!rect && x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
+    state.historyCloseTimer = 0;
+    closeSpendHistory();
   }
 
   function expandedRectContainsPoint(rect, x, y, expand) {
@@ -1894,20 +2101,6 @@
     const cards = [state.contextCard, state.providerCard].filter((card) => card && !card.hidden);
     if (cards.some((card) => expandedRectContainsPoint(card.getBoundingClientRect(), x, y, 6))) {
       return true;
-    }
-
-    if (state.historyPanel && root.dataset.historyOpen === "true") {
-      const panelRect = state.historyPanel.getBoundingClientRect();
-      if (expandedRectContainsPoint(panelRect, x, y, 6)) return true;
-
-      for (const card of cards) {
-        const cardRect = card.getBoundingClientRect();
-        const bridgeLeft = Math.min(cardRect.left, panelRect.left) - 6;
-        const bridgeRight = Math.max(cardRect.right, panelRect.right) + 6;
-        const bridgeTop = Math.min(cardRect.bottom, panelRect.top) - 2;
-        const bridgeBottom = Math.max(cardRect.bottom, panelRect.top) + 10;
-        if (x >= bridgeLeft && x <= bridgeRight && y >= bridgeTop && y <= bridgeBottom) return true;
-      }
     }
 
     return false;
@@ -1944,6 +2137,10 @@
     if (state.historyHoverCleanup) state.historyHoverCleanup();
     root.dataset.historyHoverInstalled = "true";
     if (root.dataset.historyOpen !== "true") root.dataset.historyOpen = "false";
+    ensureHistoryPortal(root);
+    if (state.historyPortal && state.historyPortal.dataset.historyOpen !== "true") {
+      state.historyPortal.dataset.historyOpen = "false";
+    }
     state.historyHoverCleanup = installHistoryPointerTracker(root);
   }
 
@@ -3121,6 +3318,69 @@
     return null;
   }
 
+  function collectContextUsageSampleConversationIds(activeConversationId) {
+    const ids = [];
+    const add = (conversationId) => {
+      const normalizedConversationId = normalizeConversationId(conversationId);
+      if (!normalizedConversationId || ids.includes(normalizedConversationId)) return;
+      ids.push(normalizedConversationId);
+    };
+
+    add(activeConversationId);
+    for (const element of document.querySelectorAll("[data-app-action-sidebar-thread-id]")) {
+      add(getElementConversationId(element));
+      if (ids.length >= CONTEXT_USAGE_BACKGROUND_SAMPLE_MAX_CONVERSATIONS) return ids;
+    }
+    for (const conversationId of state.readingsByConversationId.keys()) add(conversationId);
+    for (const conversationId of state.lastAnimatedUsedByConversationId.keys()) add(conversationId);
+
+    return ids.slice(0, CONTEXT_USAGE_BACKGROUND_SAMPLE_MAX_CONVERSATIONS);
+  }
+
+  function rememberContextUsageReading(reading, fallbackConversationId) {
+    const conversationId = normalizeConversationId(reading && (reading.conversationId || fallbackConversationId));
+    if (!conversationId || !reading) return null;
+
+    reading.conversationId = conversationId;
+    state.readingsByConversationId.set(conversationId, reading);
+    return conversationId;
+  }
+
+  function recordContextUsageDelta(reading, fallbackConversationId, options = {}) {
+    const conversationId = rememberContextUsageReading(reading, fallbackConversationId);
+    if (!conversationId || !Number.isFinite(reading.used)) return null;
+
+    const previousUsed = state.lastAnimatedUsedByConversationId.get(conversationId);
+    if (Number.isFinite(previousUsed) && reading.used > previousUsed) {
+      const deltaTokens = reading.used - previousUsed;
+      if (shouldShowContextSpendEffect(conversationId, reading.used)) {
+        recordSpend("context", deltaTokens, conversationId);
+        if (options.showEffect !== false) showTokenSpendEffect(deltaTokens);
+      }
+    }
+    state.lastAnimatedUsedByConversationId.set(conversationId, reading.used);
+    return conversationId;
+  }
+
+  // 已知/侧栏可见会话的 app-signal 读数可按会话 ID 查询；每 5 秒顺手刷新一次，避免只记录当前可见会话。
+  function sampleKnownConversationContextUsage(activeConversationId) {
+    const now = Date.now();
+    if (now - state.contextUsageBackgroundSampleAt < CONTEXT_USAGE_BACKGROUND_SAMPLE_INTERVAL_MS) return;
+
+    const conversationIds = collectContextUsageSampleConversationIds(activeConversationId);
+    state.contextUsageBackgroundSampleAt = now;
+    state.contextUsageBackgroundSampleConversationIds = conversationIds;
+    if (!conversationIds.length) return;
+
+    for (const conversationId of conversationIds) {
+      if (conversationIdsMatch(conversationId, activeConversationId)) continue;
+
+      const reading = scanAppSignalContextUsage(conversationId);
+      if (!reading) continue;
+      recordContextUsageDelta(reading, conversationId, { showEffect: false });
+    }
+  }
+
   function shouldWaitForAppSignalModules(now) {
     return !!(
       state.appSignalModulesPromise &&
@@ -3146,6 +3406,7 @@
   function shouldIgnoreMutationTarget(element) {
     if (!element || element.nodeType !== Node.ELEMENT_NODE) return false;
     if (element.closest(`#${ROOT_ID}`)) return true;
+    if (element.closest(`#${HISTORY_PORTAL_ID}`)) return true;
     return !!element.closest(MESSAGE_MUTATION_SELECTOR);
   }
 
@@ -3202,24 +3463,25 @@
     const activeChangedSinceScan = activeConversationId !== state.lastScannedConversationId;
     const inSwitchRetryWindow = !!activeConversationId && now < state.switchRetryUntil;
 
+    const shouldRunStatusScan =
+      activeChangedSinceScan ||
+      inSwitchRetryWindow ||
+      now - state.lastScanAt >= SLOW_SCAN_INTERVAL_MS;
     const appSignalReading = scanAppSignalContextUsage(activeConversationId);
-    if (appSignalReading) {
-      if (!activeConversationId && appSignalReading.conversationId) {
-        retainConversationId(appSignalReading.conversationId);
-      }
+    if (appSignalReading && !shouldRunStatusScan) {
       state.switchRetryUntil = 0;
       clearRetryUpdate();
       return appSignalReading;
     }
 
-    if (shouldWaitForAppSignalModules(now)) {
-      scheduleUpdate(APP_SIGNAL_IMPORT_GRACE_MS);
-      return state.lastReading;
-    }
-
-    if (!activeChangedSinceScan && !inSwitchRetryWindow && now - state.lastScanAt < SLOW_SCAN_INTERVAL_MS) {
+    if (!shouldRunStatusScan) {
+      if (shouldWaitForAppSignalModules(now)) {
+        scheduleUpdate(APP_SIGNAL_IMPORT_GRACE_MS);
+        return state.lastReading;
+      }
       return fallbackReading;
     }
+
     // 会话切换初期允许快速兜底；同一会话内的昂贵扫描按窗口限频。
     const canRunExpensiveFallback =
       activeChangedSinceScan ||
@@ -3229,20 +3491,14 @@
     state.lastScannedConversationId = activeConversationId;
     state.lastScanAt = now;
 
-    const appSignalRecentlyWorked =
-      conversationIdsMatch(activeConversationId, state.appSignalCachedConversationId) &&
-      now - state.appSignalLastSuccessAt < SLOW_SCAN_INTERVAL_MS;
-
-    if (!appSignalRecentlyWorked || inSwitchRetryWindow) {
-      const statusReactReading = scanStatusReactContextUsage(activeConversationId);
-      if (statusReactReading) {
-        state.switchRetryUntil = 0;
-        clearRetryUpdate();
-        return statusReactReading;
-      }
+    const statusReactReading = scanStatusReactContextUsage(activeConversationId);
+    if (statusReactReading) {
+      state.switchRetryUntil = 0;
+      clearRetryUpdate();
+      return statusReactReading;
     }
 
-    if (canRunExpensiveFallback && (!appSignalRecentlyWorked || inSwitchRetryWindow)) {
+    if (canRunExpensiveFallback) {
       state.expensiveFallbackScannedAt = now;
       state.expensiveFallbackConversationId = activeConversationId;
 
@@ -3253,6 +3509,17 @@
         clearRetryUpdate();
         return windowReading;
       }
+    }
+
+    if (appSignalReading) {
+      state.switchRetryUntil = 0;
+      clearRetryUpdate();
+      return appSignalReading;
+    }
+
+    if (shouldWaitForAppSignalModules(now)) {
+      scheduleUpdate(APP_SIGNAL_IMPORT_GRACE_MS);
+      return state.lastReading;
     }
 
     if (inSwitchRetryWindow) {
@@ -3269,11 +3536,7 @@
   function rememberReading(reading, fallbackConversationId) {
     if (!reading) return;
 
-    const conversationId = normalizeConversationId(reading.conversationId || fallbackConversationId);
-    if (conversationId) {
-      reading.conversationId = conversationId;
-      state.readingsByConversationId.set(conversationId, reading);
-    }
+    rememberContextUsageReading(reading, fallbackConversationId);
     state.lastReading = reading;
   }
 
@@ -3330,17 +3593,8 @@
       reading.conversationId || activeConversationId || "__unknown__"
     );
 
-    if (readingConversationId && Number.isFinite(reading.used)) {
-      const previousUsed = state.lastAnimatedUsedByConversationId.get(readingConversationId);
-      if (Number.isFinite(previousUsed) && reading.used > previousUsed) {
-        const deltaTokens = reading.used - previousUsed;
-        if (shouldShowContextSpendEffect(readingConversationId, reading.used)) {
-          recordSpend("context", deltaTokens, readingConversationId);
-          showTokenSpendEffect(deltaTokens);
-        }
-      }
-      state.lastAnimatedUsedByConversationId.set(readingConversationId, reading.used);
-    }
+    recordContextUsageDelta(reading, readingConversationId, { showEffect: true });
+    sampleKnownConversationContextUsage(readingConversationId);
 
     const level = levelForLeftPercent(leftPercent, "context");
     const compressionWarning = shouldShowCompressionWarning(leftPercent) ? "true" : "false";
@@ -3504,6 +3758,9 @@
       const root = document.getElementById(ROOT_ID);
       if (root) root.remove();
 
+      const portal = document.getElementById(HISTORY_PORTAL_ID);
+      if (portal) portal.remove();
+
       const style = document.getElementById(STYLE_ID);
       if (style) style.remove();
 
@@ -3516,6 +3773,8 @@
         lastReading: state.lastReading,
         cachedConversationIds: Array.from(state.readingsByConversationId.keys()),
         animatedConversationIds: Array.from(state.lastAnimatedUsedByConversationId.keys()),
+        backgroundSampledConversationIds: state.contextUsageBackgroundSampleConversationIds.slice(),
+        backgroundSampledAt: state.contextUsageBackgroundSampleAt,
         hasAppSignalScope: isAppSignalScope(state.appSignalScope),
         hasAppSignalModules: !!state.appSignalModules,
         appSignalTokenUsageSelectorExport: state.appSignalTokenUsageSelectorExport,
@@ -3531,4 +3790,3 @@
   installObserver();
   state.timer = window.setInterval(updateMeter, UPDATE_INTERVAL_MS);
 })();
-
