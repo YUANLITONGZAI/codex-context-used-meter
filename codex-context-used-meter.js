@@ -9,7 +9,7 @@
   const UI_STATE_STORAGE_KEY = "__codexContextMeterUiState";
   const PROVIDER_SUMMARY_KEY = "__codexContextMeterProviderSummary";
   const PROVIDER_SUMMARY_EVENT = "codex-context-meter-provider-summary";
-  const SCRIPT_VERSION = 101;
+  const SCRIPT_VERSION = 102;
   const UPDATE_INTERVAL_MS = 5000;
   const SLOW_SCAN_INTERVAL_MS = UPDATE_INTERVAL_MS;
   const CONTEXT_USAGE_BACKGROUND_SAMPLE_INTERVAL_MS = UPDATE_INTERVAL_MS;
@@ -22,6 +22,7 @@
   const ACTIVE_CONVERSATION_LOOKUP_CACHE_MS = 250;
   const APP_SIGNAL_READING_CACHE_MS = 120;
   const APP_SIGNAL_IMPORT_GRACE_MS = 600;
+  const APP_SIGNAL_IMPORT_RETRY_MS = 30000;
   const INLINE_MOUNT_CACHE_MS = 5000;
   // 以下限额只约束兜底扫描；主路径读 app signal / 已缓存读数，不受这些值影响。
   const EXPENSIVE_FALLBACK_INTERVAL_MS = 2500;
@@ -31,6 +32,11 @@
   const SPEND_HISTORY_MAX_ITEMS = 200;
   const SPEND_HISTORY_CHART_WIDTH = 244;
   const SPEND_HISTORY_CHART_HEIGHT = 72;
+  const CONTEXT_HISTORY_TIME_GRID_MS = 5 * 60 * 1000;
+  const CONTEXT_HISTORY_TIME_LABEL_INTERVALS_MS = [5, 10, 15, 30].map((minutes) => minutes * 60 * 1000);
+  const CONTEXT_HISTORY_TIME_LABEL_MIN_WIDTH = 46;
+  const CONTEXT_HISTORY_TIME_MIN_WINDOW_MS = 15 * 60 * 1000;
+  const CONTEXT_HISTORY_MIN_BAR_PITCH = 5;
   const SPEND_HISTORY_CHART_PADDING = 8;
   const SPEND_HISTORY_CHART_AXIS_WIDTH = 52;
   const SPEND_EFFECT_DURATION_MS = 3000;
@@ -43,6 +49,15 @@
   const HISTORY_PANEL_GAP = 8;
   const HISTORY_PANEL_MIN_WIDTH = 240;
   const HISTORY_PANEL_MIN_HEIGHT = 80;
+  const HISTORY_CLOSE_GRACE_MS = 120;
+  const HEADER_EDGE_GAP = 16;
+  const HEADER_CONTROL_GAP = 12;
+  const HEADER_TITLE_GAP = 18;
+  const HEADER_STABLE_SLOT_MIN_OFFSET = 210;
+  const HEADER_STABLE_SLOT_RATIO = 0.18;
+  const HEADER_SAFE_LEFT_INSET = 140;
+  const HEADER_MIN_CARD_WIDTH = 150;
+  const HEADER_NORMAL_CARD_WIDTH = 260;
   const HISTORY_PORTAL_THEME_VARIABLES = [
     "--ccm-card-value",
     "--ccm-panel-border",
@@ -60,7 +75,7 @@
   const FLOAT_SCALE_MAX = 1.8;
   const FLOAT_SCALE_STEP = 0.08;
   const DEFAULT_FLOATING_UI = {
-    mode: "inline",
+    mode: "header",
     floatingLayout: "horizontal",
     theme: "dark",
     x: 16,
@@ -193,7 +208,14 @@
 
   const state = {
     activeConversationId: null,
+    conversationGeneration: 0,
+    activationEpoch: 0,
+    transactionStartedAt: 0,
+    transactionReason: null,
+    authoritySnapshot: null,
     lastReading: null,
+    renderedContextReading: null,
+    renderedContextConversationId: null,
     readingsByConversationId: new Map(),
     lastAnimatedUsedByConversationId: new Map(),
     lastAnimatedProviderUsedById: new Map(),
@@ -215,6 +237,10 @@
     inlineMountCache: null,
     inlineMountPending: false,
     inlineMountLookupAt: 0,
+    headerHost: null,
+    headerTitle: null,
+    headerBefore: null,
+    headerMountPending: false,
     uiState: DEFAULT_FLOATING_UI,
     contextMenu: null,
     contextMenuCloseListener: null,
@@ -230,6 +256,8 @@
     contextSessionTotalsByConversationId: new Map(),
     providerSessionTotalsByConversationId: new Map(),
     historyCloseTimer: 0,
+    historyPointerInside: false,
+    historyFocusInside: false,
     historyHoverCleanup: null,
     uiConfig: DEFAULT_UI_CONFIG,
     providerSummaryListener: null,
@@ -248,11 +276,21 @@
     cachedActiveConversationId: null,
     activeConversationIdLookupAt: 0,
     appSignalScope: null,
+    appSignalScopeGeneration: 0,
+    appSignalScopeOwnerConversationId: null,
     appSignalModules: null,
     appSignalModulesPromise: null,
+    appSignalModuleError: null,
+    appSignalOptionalModuleError: null,
+    appSignalLastReadError: null,
+    appSignalModuleRetryAt: 0,
+    appSignalScopeRetryConversationId: null,
+    appSignalScopeRetryCount: 0,
+    appSignalScopeInvalidations: 0,
     appSignalLastLookupAt: 0,
     appSignalCachedReading: null,
     appSignalCachedConversationId: null,
+    appSignalCachedGeneration: 0,
     appSignalCachedAt: 0,
     appSignalLastSuccessAt: 0,
     appSignalModulesRequestedAt: 0,
@@ -389,6 +427,54 @@
       #${ROOT_ID}[data-placement="inline"] .ccm-value,
       #${ROOT_ID}[data-placement="inline"] .ccm-provider-value {
         display: none !important;
+      }
+
+      #${ROOT_ID}[data-placement="header"] {
+        position: fixed;
+        left: var(--ccm-header-left, 0px);
+        top: var(--ccm-header-top, 0px);
+        right: auto;
+        bottom: auto;
+        z-index: 1000;
+        transform: translateY(-50%);
+        flex: none;
+        width: var(--ccm-header-width, ${HEADER_NORMAL_CARD_WIDTH}px);
+        min-width: 0;
+        max-width: none;
+        margin: 0;
+        justify-content: flex-start;
+      }
+
+      #${ROOT_ID}[data-placement="header"] .ccm-context-card {
+        width: 100%;
+        max-width: none;
+        padding: 5px 10px 6px;
+        border-radius: 9px;
+        background: var(--ccm-card-bg);
+        box-shadow: var(--ccm-card-shadow);
+      }
+
+      #${ROOT_ID}[data-placement="header"] .ccm-context-card .ccm-row {
+        justify-content: center;
+        margin-bottom: 4px;
+      }
+
+      #${ROOT_ID}[data-placement="header"] .ccm-context-card .ccm-value {
+        display: block;
+        min-width: 0;
+        max-width: 100%;
+        overflow: hidden;
+        text-align: center;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      #${ROOT_ID}[data-placement="header"] .ccm-context-card .ccm-ring {
+        display: none !important;
+      }
+
+      #${ROOT_ID}[data-placement="header"] .ccm-context-card .ccm-track {
+        display: block;
       }
 
       #${ROOT_ID}[data-placement="floating"] {
@@ -692,6 +778,128 @@
         font-variant-numeric: tabular-nums;
       }
 
+      #${HISTORY_PORTAL_ID} .ccm-context-summary {
+        display: grid;
+        grid-template-columns: auto minmax(0, 1fr) auto;
+        column-gap: 10px;
+        row-gap: 2px;
+        margin: -1px 0 8px;
+        padding-bottom: 7px;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        font-size: 11px;
+        font-variant-numeric: tabular-nums;
+        white-space: nowrap;
+      }
+
+      #${HISTORY_PORTAL_ID} .ccm-context-summary-label {
+        color: rgba(255, 255, 255, 0.48);
+      }
+
+      #${HISTORY_PORTAL_ID} .ccm-context-summary-value {
+        justify-self: end;
+        color: rgba(255, 255, 255, 0.72);
+      }
+
+      #${HISTORY_PORTAL_ID} .ccm-context-summary-percent {
+        min-width: 40px;
+        color: rgba(255, 255, 255, 0.56);
+        text-align: right;
+      }
+
+      #${HISTORY_PORTAL_ID} .ccm-context-summary[hidden] {
+        display: none !important;
+      }
+
+      #${HISTORY_PORTAL_ID} .ccm-context-history-gridline {
+        fill: none;
+        stroke: rgba(255, 255, 255, 0.09);
+        stroke-dasharray: 2 4;
+        stroke-width: 1;
+        vector-effect: non-scaling-stroke;
+      }
+
+      #${HISTORY_PORTAL_ID} .ccm-context-history-gridline[data-baseline="true"] {
+        stroke: rgba(255, 255, 255, 0.18);
+        stroke-dasharray: none;
+      }
+
+      #${HISTORY_PORTAL_ID} .ccm-context-history-axis-label {
+        fill: rgba(255, 255, 255, 0.42);
+        font-size: 9px;
+        font-variant-numeric: tabular-nums;
+      }
+
+      #${HISTORY_PORTAL_ID} .ccm-context-history-time-gridline {
+        stroke: rgba(255, 255, 255, 0.055);
+        stroke-width: 1;
+        vector-effect: non-scaling-stroke;
+      }
+
+      #${HISTORY_PORTAL_ID} .ccm-context-history-time-gridline[data-major="true"] {
+        stroke: rgba(255, 255, 255, 0.1);
+      }
+
+      #${HISTORY_PORTAL_ID} .ccm-context-history-time-label {
+        fill: rgba(255, 255, 255, 0.36);
+        font-size: 8.5px;
+        font-variant-numeric: tabular-nums;
+      }
+
+      #${HISTORY_PORTAL_ID} .ccm-context-history-bar {
+        fill: var(--ccm-history-accent);
+        opacity: 0.58;
+        vector-effect: non-scaling-stroke;
+      }
+
+      #${HISTORY_PORTAL_ID} .ccm-context-history-latest-bar,
+      #${HISTORY_PORTAL_ID} .ccm-context-history-bar[data-active="true"] {
+        opacity: 1;
+      }
+
+      #${HISTORY_PORTAL_ID} .ccm-context-history-bar[data-active="true"] {
+        stroke: rgba(224, 247, 255, 0.82);
+        stroke-width: 1;
+      }
+
+      #${HISTORY_PORTAL_ID} .ccm-context-history-hit {
+        fill: transparent;
+        pointer-events: none;
+      }
+
+      #${HISTORY_PORTAL_ID} .ccm-context-history-pointer-layer {
+        fill: transparent;
+        pointer-events: all;
+      }
+
+      #${HISTORY_PORTAL_ID} .ccm-context-history-tooltip {
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 80ms ease;
+      }
+
+      #${HISTORY_PORTAL_ID} .ccm-context-history-tooltip[data-visible="true"] {
+        opacity: 1;
+      }
+
+      #${HISTORY_PORTAL_ID} .ccm-context-history-tooltip-bg {
+        fill: rgba(18, 21, 28, 0.96);
+        stroke: rgba(255, 255, 255, 0.16);
+        stroke-width: 1;
+      }
+
+      #${HISTORY_PORTAL_ID} .ccm-context-history-tooltip-time {
+        fill: rgba(255, 255, 255, 0.58);
+        font-size: 8.5px;
+        font-variant-numeric: tabular-nums;
+      }
+
+      #${HISTORY_PORTAL_ID} .ccm-context-history-tooltip-value {
+        fill: rgba(232, 250, 255, 0.96);
+        font-size: 10px;
+        font-weight: 600;
+        font-variant-numeric: tabular-nums;
+      }
+
       #${HISTORY_PORTAL_ID} .ccm-history-chart {
         position: relative;
         width: 100%;
@@ -954,6 +1162,17 @@
               <span class="ccm-history-title">Context / Session</span>
               <span class="ccm-history-total">--</span>
             </div>
+            <div class="ccm-context-summary" hidden>
+              <span class="ccm-context-summary-label">Left</span>
+              <span class="ccm-context-summary-value" data-context-summary-value="left">--</span>
+              <span class="ccm-context-summary-percent" data-context-summary-percent="left">--</span>
+              <span class="ccm-context-summary-label">Used</span>
+              <span class="ccm-context-summary-value" data-context-summary-value="used">--</span>
+              <span class="ccm-context-summary-percent" data-context-summary-percent="used">--</span>
+              <span class="ccm-context-summary-label">Total</span>
+              <span class="ccm-context-summary-value" data-context-summary-value="total">--</span>
+              <span class="ccm-context-summary-percent" aria-hidden="true"></span>
+            </div>
             <div class="ccm-history-chart"></div>
           </div>
           <div class="ccm-history-section" data-history-kind="provider">
@@ -1026,9 +1245,202 @@
       root.dataset.infrastructureVersion = String(SCRIPT_VERSION);
     }
     if (!isRootBound(root)) bindRootElements(root);
+    installContextTitleSuppression(root);
     installHistoryHover(root);
     installContextMenu(root);
     installFloatingControls(root);
+  }
+
+  function directChildOf(parent, node) {
+    let current = node;
+    while (current && current.parentElement && current.parentElement !== parent) {
+      current = current.parentElement;
+    }
+    return current && current.parentElement === parent ? current : null;
+  }
+
+  function headerTitleContentRight(rail, title) {
+    const titleBranch = directChildOf(rail, title);
+    let right = title.getBoundingClientRect().right;
+    if (!titleBranch) return right;
+    const railRect = rail.getBoundingClientRect();
+    for (const control of titleBranch.querySelectorAll("button, [role='button'], a")) {
+      if (!isVisibleElement(control) || control.closest(`#${ROOT_ID}, #${HISTORY_PORTAL_ID}`)) continue;
+      const rect = control.getBoundingClientRect();
+      if (rect.bottom <= railRect.top || rect.top >= railRect.bottom) continue;
+      right = Math.max(right, rect.right);
+    }
+    return right;
+  }
+
+  function isHeaderTitleCandidate(node, railRect) {
+    if (!(node instanceof Element) || !isVisibleElement(node)) return false;
+    if (node.closest(`#${ROOT_ID}, #${HISTORY_PORTAL_ID}`)) return false;
+    const text = (node.textContent || "").replace(/\s+/g, " ").trim();
+    if (text.length < 2 || text.length > 100) return false;
+    const rect = node.getBoundingClientRect();
+    if (rect.width <= 0 || rect.width > Math.min(420, railRect.width * 0.48)) return false;
+    if (rect.left < railRect.left - 4 || rect.left > railRect.left + railRect.width * 0.62) return false;
+    return rect.top >= railRect.top - 3 && rect.bottom <= railRect.bottom + 3;
+  }
+
+  function hasIndependentHeaderControls(rail, title) {
+    const titleRight = headerTitleContentRight(rail, title);
+    const titleBranch = directChildOf(rail, title);
+    if (!titleBranch) return [];
+    const railRect = rail.getBoundingClientRect();
+    const independentControlFloor = Math.max(titleRight + HEADER_CONTROL_GAP, railRect.left + railRect.width * 0.62);
+    return Array.from(rail.querySelectorAll("button, [role='button'], a"))
+      .filter((control) => !control.closest(`#${ROOT_ID}, #${HISTORY_PORTAL_ID}`))
+      .filter(isVisibleElement)
+      .map((control) => ({ control, branch: directChildOf(rail, control) }))
+      .filter(({ branch }) => branch && branch !== titleBranch && !rootContainsNode(branch))
+      .filter(({ control, branch }) => {
+        const controlRect = control.getBoundingClientRect();
+        const branchRect = branch.getBoundingClientRect();
+        return controlRect.left >= independentControlFloor &&
+          branchRect.left >= independentControlFloor;
+      });
+  }
+
+  function elementDepth(node) {
+    let depth = 0;
+    for (let current = node; current && current.parentElement; current = current.parentElement) depth += 1;
+    return depth;
+  }
+
+  function findHeaderMount() {
+    const candidates = new Set(document.querySelectorAll(
+      "header, [role='banner'], [data-testid*='header'], [class*='header'], [class*='title']"
+    ));
+    for (const control of document.querySelectorAll("button, [role='button']")) {
+      if (!isVisibleElement(control) || control.closest(`#${ROOT_ID}, #${HISTORY_PORTAL_ID}`)) continue;
+      for (let current = control.parentElement, depth = 0; current && depth < 6; current = current.parentElement, depth += 1) {
+        if (current.tagName === "DIV") candidates.add(current);
+      }
+    }
+
+    let best = null;
+    for (const parent of candidates) {
+      if (!(parent instanceof Element) || !isVisibleElement(parent)) continue;
+      if (parent.closest(`#${ROOT_ID}, #${HISTORY_PORTAL_ID}, aside, nav`)) continue;
+      const rect = parent.getBoundingClientRect();
+      if (rect.top < 36 || rect.top > Math.min(window.innerHeight * 0.32, 122)) continue;
+      if (rect.height < 40 || rect.height > 76 || rect.width < 520) continue;
+      if (rect.left < 120 || rect.left > Math.min(560, window.innerWidth * 0.38)) continue;
+
+      const titleNodes = Array.from(parent.querySelectorAll(
+        "h1, h2, h3, [role='heading'], [data-testid*='title'], [class*='title'], span"
+      ));
+      const title = titleNodes
+        .filter((node) => isHeaderTitleCandidate(node, rect))
+        .sort((left, right) => {
+          const leftRect = left.getBoundingClientRect();
+          const rightRect = right.getBoundingClientRect();
+          const leftScore = (left.children.length === 0 ? 20 : 0) - Math.abs(leftRect.left - rect.left) / 8;
+          const rightScore = (right.children.length === 0 ? 20 : 0) - Math.abs(rightRect.left - rect.left) / 8;
+          return rightScore - leftScore;
+        })[0];
+      if (!title) continue;
+
+      const controls = hasIndependentHeaderControls(parent, title);
+      if (!controls.length) continue;
+      controls.sort((left, right) => {
+        const branchDifference = left.branch.getBoundingClientRect().left - right.branch.getBoundingClientRect().left;
+        if (branchDifference) return branchDifference;
+        return left.control.getBoundingClientRect().left - right.control.getBoundingClientRect().left;
+      });
+      const before = controls[0].branch;
+      if (!before || before === title || rootContainsNode(before)) continue;
+
+      const titleRight = headerTitleContentRight(parent, title);
+      const controlRect = before.getBoundingClientRect();
+      const available = controlRect.left - titleRight - HEADER_TITLE_GAP - HEADER_CONTROL_GAP;
+      if (available < HEADER_MIN_CARD_WIDTH) continue;
+      const depth = elementDepth(parent);
+      const titlePriority = title.matches("h1,h2,h3,[role='heading']") ? 1 : 0;
+      if (
+        !best ||
+        depth > best.depth ||
+        (depth === best.depth && titlePriority > best.titlePriority)
+      ) {
+        best = { parent, title, before, available, depth, titlePriority };
+      }
+    }
+    return best && { parent: best.parent, title: best.title, before: best.before, available: best.available };
+  }
+
+  function positionHeaderRoot(root) {
+    const host = state.headerHost;
+    const title = state.headerTitle;
+    const before = state.headerBefore;
+    if (!root || root.parentNode !== document.body) return false;
+    if (!host?.isConnected || !title?.isConnected || !before?.isConnected) return false;
+    if (!host.contains(title) || !host.contains(before)) return false;
+    const hostRect = host.getBoundingClientRect();
+    const controlRect = before.getBoundingClientRect();
+    const titleRight = headerTitleContentRight(host, title);
+    const viewportWidth = window.innerWidth || document.documentElement.clientWidth;
+    const safeLeft = Math.max(
+      HEADER_EDGE_GAP,
+      hostRect.left + HEADER_SAFE_LEFT_INSET,
+      titleRight + HEADER_TITLE_GAP,
+    );
+    const safeRight = Math.min(
+      viewportWidth - HEADER_EDGE_GAP,
+      hostRect.right - HEADER_CONTROL_GAP,
+      controlRect.left - HEADER_CONTROL_GAP,
+    );
+    const available = safeRight - safeLeft;
+    if (!Number.isFinite(available) || available < HEADER_MIN_CARD_WIDTH || hostRect.height <= 0) {
+      return false;
+    }
+    const width = Math.min(HEADER_NORMAL_CARD_WIDTH, available);
+    const stableSlotLeft = hostRect.left + Math.max(
+      HEADER_STABLE_SLOT_MIN_OFFSET,
+      hostRect.width * HEADER_STABLE_SLOT_RATIO,
+    );
+    const targetLeft = Math.max(stableSlotLeft, titleRight + HEADER_TITLE_GAP);
+    const left = clampNumber(
+      targetLeft,
+      safeLeft,
+      safeRight - width,
+    );
+    const top = hostRect.top + hostRect.height / 2;
+    root.style.setProperty("--ccm-header-width", `${Math.round(width)}px`);
+    root.style.setProperty("--ccm-header-left", `${Math.round(left)}px`);
+    root.style.setProperty("--ccm-header-top", `${Math.round(top)}px`);
+    return true;
+  }
+
+  function rootContainsNode(node) {
+    const root = state.root || document.getElementById(ROOT_ID);
+    return !!(root && (node === root || root.contains(node)));
+  }
+
+  function isHeaderMountCurrent(root) {
+    const uiState = state.uiState || readUiState();
+    if (uiState.mode !== "header" || root.dataset.placement !== "header") return false;
+    if (root.parentNode !== document.body) return false;
+    if (!state.headerHost?.isConnected || !state.headerTitle?.isConnected) return false;
+    if (!state.headerBefore?.isConnected) return false;
+    if (!state.headerHost.contains(state.headerTitle) || !state.headerHost.contains(state.headerBefore)) return false;
+    return true;
+  }
+
+  function clearContextNativeTitles() {
+    const card = state.contextCard;
+    if (!card) return;
+    for (const node of [card, state.value, card.querySelector(".ccm-row"), state.root]) {
+      if (node && node.hasAttribute("title")) node.removeAttribute("title");
+    }
+  }
+
+  function installContextTitleSuppression(root) {
+    if (!root || root.dataset.contextTitleSuppressionInstalled === "true") return;
+    root.dataset.contextTitleSuppressionInstalled = "true";
+    root.addEventListener("pointerover", clearContextNativeTitles, true);
+    root.addEventListener("focusin", clearContextNativeTitles, true);
   }
 
   function isInlineMountCurrent(root) {
@@ -1045,7 +1457,16 @@
     if (root) {
       ensureRootInfrastructure(root);
       state.uiState = readUiState();
-      if (!isInlineMountCurrent(root)) mountRoot(root);
+      const headerMountCurrent = isHeaderMountCurrent(root);
+      if (!headerMountCurrent && !isInlineMountCurrent(root)) {
+        mountRoot(root);
+      } else if (headerMountCurrent) {
+        state.headerMountPending = !positionHeaderRoot(root);
+        if (state.headerMountPending) {
+          root.hidden = true;
+          closeSpendHistory();
+        }
+      }
       return root;
     }
 
@@ -1220,6 +1641,49 @@
 
   function mountRoot(root) {
     state.uiState = readUiState();
+    if (state.uiState.mode === "header") {
+      const mount = findHeaderMount();
+      state.inlineHost = null;
+      state.inlineBefore = null;
+      state.inlineMountCache = null;
+      state.inlineMountPending = false;
+      root.dataset.placement = "header";
+      if (!mount || !mount.parent || root.contains(mount.parent)) {
+        state.headerHost = null;
+        state.headerTitle = null;
+        state.headerBefore = null;
+        state.headerMountPending = true;
+        if (root.parentNode !== document.body) document.body.appendChild(root);
+        root.hidden = true;
+        closeSpendHistory();
+        scheduleUpdate(SWITCH_RETRY_INTERVAL_MS);
+        return;
+      }
+
+      const before = mount.before || null;
+      root.removeAttribute("data-codex-rail-managed");
+      if (root.dataset.layout === "rail-managed") delete root.dataset.layout;
+      if (root.parentNode !== document.body) document.body.appendChild(root);
+      state.headerHost = mount.parent;
+      state.headerTitle = mount.title;
+      state.headerBefore = before;
+      if (!positionHeaderRoot(root)) {
+        state.headerMountPending = true;
+        root.hidden = true;
+        closeSpendHistory();
+        scheduleUpdate(SWITCH_RETRY_INTERVAL_MS);
+        return;
+      }
+      state.headerMountPending = false;
+      applyFloatingUiState(root);
+      refreshOpenSpendHistory(root);
+      return;
+    }
+
+    state.headerHost = null;
+    state.headerTitle = null;
+    state.headerBefore = null;
+    state.headerMountPending = false;
     if (state.uiState.mode === "floating") {
       state.inlineMountCache = null;
       state.inlineMountPending = false;
@@ -1272,7 +1736,7 @@
   function setUiMode(mode) {
     state.uiState = {
       ...readUiState(),
-      mode: mode === "floating" ? "floating" : "inline",
+      mode: mode === "floating" || mode === "inline" ? mode : "header",
     };
     writeUiState();
     closeContextMenu();
@@ -1322,7 +1786,9 @@
     closeContextMenu();
     state.uiState = readUiState();
 
-    const currentMode = (state.uiState && state.uiState.mode) === "floating" ? "floating" : "inline";
+    const currentMode = ["header", "inline", "floating"].includes(state.uiState && state.uiState.mode)
+      ? state.uiState.mode
+      : "header";
     const currentFloatingLayout =
       (state.uiState && state.uiState.floatingLayout) === "vertical" ? "vertical" : "horizontal";
     const currentTheme = (state.uiState && state.uiState.theme) === "light" ? "light" : "dark";
@@ -1352,6 +1818,7 @@
       createRadioItem("theme", "dark", "Dark theme", currentTheme === "dark"),
       createRadioItem("theme", "light", "Light theme", currentTheme === "light"),
       document.createElement("div"),
+      createRadioItem("mode", "header", "Header mode", currentMode === "header"),
       createRadioItem("mode", "inline", "Inline mode", currentMode === "inline"),
       createRadioItem("mode", "floating", "Floating mode", currentMode === "floating"),
     ];
@@ -1530,8 +1997,11 @@
     try {
       const parsed = JSON.parse(localStorage.getItem(UI_STATE_STORAGE_KEY) || "null");
       const input = parsed && typeof parsed === "object" ? parsed : {};
+      const mode = input.mode === "floating" || input.mode === "inline" || input.mode === "header"
+        ? input.mode
+        : DEFAULT_FLOATING_UI.mode;
       return {
-        mode: input.mode === "floating" ? "floating" : "inline",
+        mode,
         floatingLayout: input.floatingLayout === "vertical" ? "vertical" : "horizontal",
         theme: input.theme === "light" ? "light" : "dark",
         x: clampNumber(Number(input.x), 0, Math.max(0, window.innerWidth - 80)),
@@ -1645,18 +2115,6 @@
     ].join(" | ");
   }
 
-  function formatContextTitle(reading, usedTokens, remainingTokens, leftPercent, usedPercent) {
-    const limitTokens = Number.isFinite(reading.limit) ? reading.limit : null;
-    const parts = [
-      "Context",
-      `Left: ${formatTokenCount(remainingTokens)} Tokens (${leftPercent.toFixed(1)}%)`,
-      `Used: ${formatTokenCount(usedTokens)} Tokens (${usedPercent.toFixed(1)}%)`,
-    ];
-    if (Number.isFinite(limitTokens)) parts.push(`Total: ${formatTokenCount(limitTokens)} Tokens`);
-    if (reading.source) parts.push(`Source: ${reading.source}`);
-    return parts.join(" | ");
-  }
-
   function pruneSpendHistory(now = Date.now()) {
     const cutoff = now - SPEND_HISTORY_WINDOW_MS;
     for (const kind of ["context", "provider"]) {
@@ -1704,7 +2162,7 @@
 
   function formatHistoryDelta(kind, amount) {
     if (kind === "provider") return `-${formatMoney(amount)}`;
-    return `-${Math.round(amount).toLocaleString("en-US")} Tokens`;
+    return `\u2212${Math.round(amount).toLocaleString("en-US")} Tokens`;
   }
 
   function formatHistoryAxisValue(kind, amount) {
@@ -1716,8 +2174,18 @@
   }
 
   function formatHistoryPointTitle(kind, point) {
+    const eventCount = point.item.eventCount || 1;
+    const firstTime = formatHistoryTime(point.item.firstTime || point.item.time);
+    const lastTime = formatHistoryTime(point.item.lastTime || point.item.time);
+    const timeLabel = eventCount > 1
+      ? `${firstTime === lastTime ? firstTime : `${firstTime}\u2013${lastTime}`} \u00b7 ${eventCount} events`
+      : firstTime;
+    const deltaLabel = formatHistoryDelta(kind, point.item.amount);
+    const valueLabel = eventCount > 1 && kind === "context"
+      ? `Total ${deltaLabel.replace(" Tokens", " tokens")}`
+      : deltaLabel;
     const lines = [
-      `${formatHistoryTime(point.item.time)} ${formatHistoryDelta(kind, point.item.amount)}`,
+      `${timeLabel} ${valueLabel}`,
     ];
     if (point.item.meta) lines.push(String(point.item.meta));
     return lines.join("\n");
@@ -1766,7 +2234,263 @@
     return Number.isFinite(value) ? value.toFixed(1) : "0.0";
   }
 
+  function niceContextHistoryAxisMax(value) {
+    if (!Number.isFinite(value) || value <= 0) return 1;
+    const magnitude = 10 ** Math.floor(Math.log10(value));
+    const normalized = value / magnitude;
+    const step = normalized <= 1 ? 1 : normalized <= 2 ? 2 : normalized <= 5 ? 5 : 10;
+    return step * magnitude;
+  }
+
+  function makeContextHistoryTimeDomain(items) {
+    const firstTime = items[0].time;
+    const lastTime = items[items.length - 1].time;
+    let start = Math.floor(firstTime / CONTEXT_HISTORY_TIME_GRID_MS) * CONTEXT_HISTORY_TIME_GRID_MS;
+    let end = Math.ceil(lastTime / CONTEXT_HISTORY_TIME_GRID_MS) * CONTEXT_HISTORY_TIME_GRID_MS;
+
+    if (firstTime === start) start -= CONTEXT_HISTORY_TIME_GRID_MS;
+    if (lastTime === end) end += CONTEXT_HISTORY_TIME_GRID_MS;
+    if (end - start < CONTEXT_HISTORY_TIME_MIN_WINDOW_MS) {
+      const center = (firstTime + lastTime) / 2;
+      start = Math.floor((center - CONTEXT_HISTORY_TIME_MIN_WINDOW_MS / 2) / CONTEXT_HISTORY_TIME_GRID_MS)
+        * CONTEXT_HISTORY_TIME_GRID_MS;
+      end = start + CONTEXT_HISTORY_TIME_MIN_WINDOW_MS;
+    }
+    if (end <= start) end = start + CONTEXT_HISTORY_TIME_GRID_MS;
+    return { start, end };
+  }
+
+  function chooseContextHistoryTimeLabelInterval(start, end, innerWidth) {
+    const maxLabels = Math.max(2, Math.floor(innerWidth / CONTEXT_HISTORY_TIME_LABEL_MIN_WIDTH) + 1);
+    return CONTEXT_HISTORY_TIME_LABEL_INTERVALS_MS.find((interval) => {
+      const firstTick = Math.ceil(start / interval) * interval;
+      const tickCount = firstTick > end ? 0 : Math.floor((end - firstTick) / interval) + 1;
+      return tickCount <= maxLabels;
+    }) || CONTEXT_HISTORY_TIME_LABEL_INTERVALS_MS[CONTEXT_HISTORY_TIME_LABEL_INTERVALS_MS.length - 1];
+  }
+
+  function makeContextHistoryDisplayItems(items, timeDomain, innerWidth) {
+    const timeSpan = timeDomain.end - timeDomain.start;
+    const xForTime = (time) => ((time - timeDomain.start) / timeSpan) * innerWidth;
+    const sortedItems = [...items].sort((left, right) => left.time - right.time);
+    const groups = [];
+
+    for (const item of sortedItems) {
+      const projectedX = xForTime(item.time);
+      const group = groups[groups.length - 1];
+      if (group && projectedX - group.lastX < CONTEXT_HISTORY_MIN_BAR_PITCH) {
+        group.items.push(item);
+        group.amount += item.amount;
+        group.lastTime = item.time;
+        group.lastX = projectedX;
+      } else {
+        groups.push({
+          items: [item],
+          amount: item.amount,
+          firstTime: item.time,
+          lastTime: item.time,
+          lastX: projectedX,
+        });
+      }
+    }
+
+    return groups.map((group) => ({
+      time: group.items.length === 1
+        ? group.firstTime
+        : Math.round((group.firstTime + group.lastTime) / 2),
+      amount: group.amount,
+      eventCount: group.items.length,
+      firstTime: group.firstTime,
+      lastTime: group.lastTime,
+    }));
+  }
+
+  function makeContextSpendTimeBarChart(items) {
+    const now = Date.now();
+    const cutoff = now - SPEND_HISTORY_WINDOW_MS;
+    const width = SPEND_HISTORY_CHART_WIDTH;
+    const height = SPEND_HISTORY_CHART_HEIGHT;
+    const plotLeft = 34;
+    const plotRight = width - 5;
+    const plotTop = 6;
+    const plotBottom = height - 15;
+    const innerWidth = plotRight - plotLeft;
+    const innerHeight = plotBottom - plotTop;
+    const chart = document.createElement("div");
+    chart.className = "ccm-history-chart";
+    chart.dataset.historyRenderer = "context-time-bars";
+
+    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    svg.setAttribute("class", "ccm-history-svg");
+    svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
+    svg.setAttribute("preserveAspectRatio", "none");
+    svg.setAttribute("role", "img");
+
+    const validItems = items
+      .filter((item) => Number.isFinite(item.time) && item.time >= cutoff && item.time <= now && Number.isFinite(item.amount) && item.amount > 0)
+      .sort((left, right) => left.time - right.time);
+    if (!validItems.length) {
+      svg.setAttribute("aria-label", "No context spend in the last hour.");
+      const empty = document.createElement("div");
+      empty.className = "ccm-history-empty";
+      empty.textContent = "No spend in the last hour";
+      chart.append(svg, empty);
+      return chart;
+    }
+
+    const timeDomain = makeContextHistoryTimeDomain(validItems);
+    const timeSpan = timeDomain.end - timeDomain.start;
+    const xForTime = (time) => plotLeft + ((time - timeDomain.start) / timeSpan) * innerWidth;
+    const displayItems = makeContextHistoryDisplayItems(validItems, timeDomain, innerWidth);
+    const axisMax = niceContextHistoryAxisMax(Math.max(...displayItems.map((item) => item.amount)));
+    const yForAmount = (amount) => plotBottom - (clampNumber(amount, 0, axisMax) / axisMax) * innerHeight;
+
+    for (const [value, baseline] of [[axisMax, false], [axisMax / 2, false], [0, true]]) {
+      const y = yForAmount(value);
+      const gridline = document.createElementNS("http://www.w3.org/2000/svg", "path");
+      gridline.setAttribute("class", "ccm-context-history-gridline");
+      gridline.setAttribute("d", `M ${svgPoint(plotLeft)} ${svgPoint(y)} H ${svgPoint(plotRight)}`);
+      if (baseline) gridline.dataset.baseline = "true";
+      svg.appendChild(gridline);
+
+      const label = document.createElementNS("http://www.w3.org/2000/svg", "text");
+      label.setAttribute("class", "ccm-context-history-axis-label");
+      label.setAttribute("x", "1");
+      label.setAttribute("y", svgPoint(y + (value === axisMax ? 7 : value === 0 ? -2 : 3)));
+      label.textContent = formatHistoryAxisValue("context", value);
+      svg.appendChild(label);
+    }
+
+    const labelInterval = chooseContextHistoryTimeLabelInterval(timeDomain.start, timeDomain.end, innerWidth);
+    for (let tick = timeDomain.start; tick <= timeDomain.end; tick += CONTEXT_HISTORY_TIME_GRID_MS) {
+      const x = xForTime(tick);
+      const isMajor = tick % labelInterval === 0;
+      const gridline = document.createElementNS("http://www.w3.org/2000/svg", "path");
+      gridline.setAttribute("class", "ccm-context-history-time-gridline");
+      gridline.setAttribute("d", `M ${svgPoint(x)} ${svgPoint(plotTop)} V ${svgPoint(plotBottom)}`);
+      if (isMajor) gridline.dataset.major = "true";
+      svg.appendChild(gridline);
+
+      if (isMajor) {
+        const label = document.createElementNS("http://www.w3.org/2000/svg", "text");
+        label.setAttribute("class", "ccm-context-history-time-label");
+        label.setAttribute("x", svgPoint(x));
+        label.setAttribute("y", svgPoint(height - 2));
+        label.setAttribute("text-anchor", x <= plotLeft + 1 ? "start" : x >= plotRight - 1 ? "end" : "middle");
+        label.textContent = formatHistoryTime(tick);
+        svg.appendChild(label);
+      }
+    }
+
+    const points = displayItems.map((item) => ({ item, x: xForTime(item.time), y: yForAmount(item.amount), bar: null }));
+    const latestPoint = points[points.length - 1];
+    const tooltipWidth = 142;
+    const tooltipHeight = 30;
+    const tooltip = document.createElementNS("http://www.w3.org/2000/svg", "g");
+    tooltip.setAttribute("class", "ccm-context-history-tooltip");
+    tooltip.setAttribute("aria-hidden", "true");
+    tooltip.dataset.visible = "false";
+    const tooltipBackground = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+    tooltipBackground.setAttribute("class", "ccm-context-history-tooltip-bg");
+    tooltipBackground.setAttribute("width", String(tooltipWidth));
+    tooltipBackground.setAttribute("height", String(tooltipHeight));
+    tooltipBackground.setAttribute("rx", "5");
+    const tooltipTime = document.createElementNS("http://www.w3.org/2000/svg", "text");
+    tooltipTime.setAttribute("class", "ccm-context-history-tooltip-time");
+    tooltipTime.setAttribute("x", "7");
+    tooltipTime.setAttribute("y", "11");
+    const tooltipValue = document.createElementNS("http://www.w3.org/2000/svg", "text");
+    tooltipValue.setAttribute("class", "ccm-context-history-tooltip-value");
+    tooltipValue.setAttribute("x", "7");
+    tooltipValue.setAttribute("y", "24");
+    tooltip.append(tooltipBackground, tooltipTime, tooltipValue);
+    let activePoint = null;
+
+    const hideTooltip = () => {
+      if (activePoint?.bar) activePoint.bar.dataset.active = "false";
+      activePoint = null;
+      tooltip.dataset.visible = "false";
+    };
+    const showTooltip = (point) => {
+      if (activePoint?.bar && activePoint !== point) activePoint.bar.dataset.active = "false";
+      activePoint = point;
+      if (point.bar) point.bar.dataset.active = "true";
+      tooltipTime.textContent = point.item.eventCount > 1
+        ? `${formatHistoryTime(point.item.firstTime)}${formatHistoryTime(point.item.firstTime) === formatHistoryTime(point.item.lastTime) ? "" : `\u2013${formatHistoryTime(point.item.lastTime)}`} \u00b7 ${point.item.eventCount} events`
+        : formatHistoryTime(point.item.time);
+      const deltaLabel = formatHistoryDelta("context", point.item.amount);
+      tooltipValue.textContent = point.item.eventCount > 1
+        ? `Total ${deltaLabel.replace(" Tokens", " tokens")}`
+        : deltaLabel;
+      const tooltipX = clampNumber(point.x - tooltipWidth / 2, 2, width - tooltipWidth - 2);
+      const preferredY = point.y - tooltipHeight - 4;
+      const tooltipY = preferredY >= 2
+        ? preferredY
+        : Math.min(point.y + 5, height - tooltipHeight - 2);
+      tooltip.setAttribute("transform", `translate(${svgPoint(tooltipX)} ${svgPoint(tooltipY)})`);
+      tooltip.dataset.visible = "true";
+    };
+
+    for (const point of points) {
+      const barWidth = 3;
+      const isLatest = point === latestPoint;
+      const bar = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+      bar.setAttribute("class", isLatest
+        ? "ccm-context-history-bar ccm-context-history-latest-bar"
+        : "ccm-context-history-bar");
+      bar.setAttribute("x", svgPoint(point.x - barWidth / 2));
+      bar.setAttribute("y", svgPoint(point.y));
+      bar.setAttribute("width", svgPoint(barWidth));
+      bar.setAttribute("height", svgPoint(Math.max(plotBottom - point.y, 1)));
+      bar.setAttribute("rx", svgPoint(Math.min(barWidth / 2, 1.6)));
+      bar.setAttribute("ry", svgPoint(Math.min(barWidth / 2, 1.6)));
+      point.bar = bar;
+      svg.appendChild(bar);
+
+      const hit = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+      hit.setAttribute("class", "ccm-context-history-hit");
+      hit.setAttribute("x", svgPoint(point.x - Math.max(barWidth, 8) / 2));
+      hit.setAttribute("y", svgPoint(plotTop));
+      hit.setAttribute("width", svgPoint(Math.max(barWidth, 8)));
+      hit.setAttribute("height", svgPoint(plotBottom - plotTop));
+      hit.setAttribute("tabindex", "0");
+      hit.setAttribute("role", "img");
+      hit.setAttribute("aria-label", formatHistoryPointTitle("context", point));
+      hit.addEventListener("focus", () => showTooltip(point));
+      hit.addEventListener("blur", hideTooltip);
+      svg.appendChild(hit);
+    }
+
+    const pointerLayer = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+    pointerLayer.setAttribute("class", "ccm-context-history-pointer-layer");
+    pointerLayer.setAttribute("x", svgPoint(plotLeft));
+    pointerLayer.setAttribute("y", svgPoint(plotTop));
+    pointerLayer.setAttribute("width", svgPoint(innerWidth));
+    pointerLayer.setAttribute("height", svgPoint(plotBottom - plotTop));
+    pointerLayer.addEventListener("pointermove", (event) => {
+      const bounds = svg.getBoundingClientRect();
+      if (!bounds.width) return;
+      const pointerX = ((event.clientX - bounds.left) / bounds.width) * width;
+      let nearestPoint = points[0];
+      for (let index = 1; index < points.length; index += 1) {
+        if (Math.abs(points[index].x - pointerX) < Math.abs(nearestPoint.x - pointerX)) nearestPoint = points[index];
+      }
+      if (Math.abs(nearestPoint.x - pointerX) <= 6) showTooltip(nearestPoint);
+      else hideTooltip();
+    });
+    pointerLayer.addEventListener("pointerleave", hideTooltip);
+    svg.append(pointerLayer, tooltip);
+
+    svg.setAttribute(
+      "aria-label",
+      `Context spend history across the active time range with ${validItems.length} positive changes in ${displayItems.length} display bars.`,
+    );
+    chart.appendChild(svg);
+    return chart;
+  }
+
   function makeSpendHistoryChart(items, kind) {
+    if (kind === "context") return makeContextSpendTimeBarChart(items);
     const now = Date.now();
     const cutoff = now - SPEND_HISTORY_WINDOW_MS;
     const width = SPEND_HISTORY_CHART_WIDTH;
@@ -1943,7 +2667,7 @@
 
     pruneSpendHistory();
     const conversationId = metaConversationId();
-    let items = state.spendHistory[kind].filter((item) => {
+    let chartItems = state.spendHistory[kind].filter((item) => {
       const itemConversationId = normalizeConversationId(item.conversationId || "__unknown__") || "__unknown__";
       return itemConversationId === conversationId;
     });
@@ -1951,19 +2675,53 @@
       kind === "context"
         ? contextSessionTotal(conversationId)
         : providerSessionTotal(conversationId);
-    if (!items.length) {
-      const snapshot = currentHistorySnapshot(kind, conversationId);
+    if (!chartItems.length && kind === "provider") {
+      const snapshot = currentProviderHistorySnapshot(conversationId);
       if (snapshot) {
-        items = [snapshot];
+        chartItems = [snapshot];
         total = snapshot.amount;
       }
     }
+
     const totalNode = section.querySelector(".ccm-history-total");
+    const summaryNode = section.querySelector(".ccm-context-summary");
     const chart = section.querySelector(".ccm-history-chart");
-    if (totalNode) totalNode.textContent = total > 0 ? formatHistoryDelta(kind, total) : "--";
+    if (totalNode) {
+      const formattedTotal = total > 0 ? formatHistoryDelta(kind, total) : null;
+      totalNode.textContent = kind === "context" && formattedTotal
+        ? `Session ${formattedTotal.replace(" Tokens", "")}`
+        : formattedTotal || "--";
+    }
+    if (summaryNode) {
+      const reading = state.renderedContextReading;
+      const renderedConversationId = normalizeConversationId(state.renderedContextConversationId);
+      const hasExactContext = reading &&
+        conversationIdsMatch(renderedConversationId, conversationId) &&
+        Number.isFinite(reading.used) &&
+        Number.isFinite(reading.limit) &&
+        reading.limit > 0;
+      summaryNode.hidden = !hasExactContext;
+      if (hasExactContext) {
+        const remaining = Math.max(0, reading.limit - reading.used);
+        const usedPercent = Number.isFinite(reading.percent)
+          ? clampPercent(reading.percent)
+          : clampPercent((reading.used / reading.limit) * 100);
+        const leftPercent = clampPercent(100 - usedPercent);
+        const leftValue = summaryNode.querySelector('[data-context-summary-value="left"]');
+        const usedValue = summaryNode.querySelector('[data-context-summary-value="used"]');
+        const totalValue = summaryNode.querySelector('[data-context-summary-value="total"]');
+        const leftPercentValue = summaryNode.querySelector('[data-context-summary-percent="left"]');
+        const usedPercentValue = summaryNode.querySelector('[data-context-summary-percent="used"]');
+        if (leftValue) leftValue.textContent = `${formatTokenCount(remaining)} tokens`;
+        if (usedValue) usedValue.textContent = `${formatTokenCount(reading.used)} tokens`;
+        if (totalValue) totalValue.textContent = `${formatTokenCount(reading.limit)} tokens`;
+        if (leftPercentValue) leftPercentValue.textContent = `${leftPercent.toFixed(1)}%`;
+        if (usedPercentValue) usedPercentValue.textContent = `${usedPercent.toFixed(1)}%`;
+      }
+    }
     if (!chart) return;
 
-    chart.replaceWith(makeSpendHistoryChart(items, kind));
+    chart.replaceWith(makeSpendHistoryChart(chartItems, kind));
   }
 
   function metaConversationId() {
@@ -2023,8 +2781,9 @@
       Math.max(panelRect.height || HISTORY_PANEL_MIN_HEIGHT, HISTORY_PANEL_MIN_HEIGHT),
       maxHeight,
     );
+    const preferredLeft = anchorRect.left + anchorRect.width / 2 - panelWidth / 2;
     const left = clampNumber(
-      anchorRect.left,
+      preferredLeft,
       HISTORY_PANEL_VIEWPORT_PADDING,
       Math.max(HISTORY_PANEL_VIEWPORT_PADDING, viewportWidth - panelWidth - HISTORY_PANEL_VIEWPORT_PADDING),
     );
@@ -2066,12 +2825,13 @@
 
   function closeSpendHistory() {
     const root = state.root;
-    if (!root) return;
     if (state.historyCloseTimer) {
       window.clearTimeout(state.historyCloseTimer);
       state.historyCloseTimer = 0;
     }
-    if (root.dataset.historyOpen !== "false") root.dataset.historyOpen = "false";
+    state.historyPointerInside = false;
+    state.historyFocusInside = false;
+    if (root && root.dataset.historyOpen !== "false") root.dataset.historyOpen = "false";
     if (state.historyPortal) state.historyPortal.dataset.historyOpen = "false";
     if (state.historyPanel) {
       state.historyPanel.setAttribute("aria-hidden", "true");
@@ -2082,54 +2842,72 @@
     const root = state.root;
     if (!root) return;
     const relatedTarget = event && event.relatedTarget;
-    if (relatedTarget && typeof relatedTarget.nodeType === "number" && root.contains(relatedTarget)) return;
+    if (isNodeInsideHistorySurface(relatedTarget, root)) return;
     if (state.historyCloseTimer) window.clearTimeout(state.historyCloseTimer);
-    state.historyCloseTimer = 0;
-    closeSpendHistory();
+    state.historyCloseTimer = window.setTimeout(() => {
+      state.historyCloseTimer = 0;
+      if (state.historyPointerInside || state.historyFocusInside) return;
+      closeSpendHistory();
+    }, HISTORY_CLOSE_GRACE_MS);
   }
 
-  function expandedRectContainsPoint(rect, x, y, expand) {
-    return !!rect &&
-      x >= rect.left - expand &&
-      x <= rect.right + expand &&
-      y >= rect.top - expand &&
-      y <= rect.bottom + expand;
-  }
-
-  function isPointerInsideHistorySurface(x, y) {
-    const root = state.root;
-    if (!root || root.hidden) return false;
-
-    const cards = [state.contextCard, state.providerCard].filter((card) => card && !card.hidden);
-    if (cards.some((card) => expandedRectContainsPoint(card.getBoundingClientRect(), x, y, 6))) {
-      return true;
-    }
-
-    return false;
+  function isNodeInsideHistorySurface(node, root = state.root) {
+    if (!node || typeof node.nodeType !== "number") return false;
+    const panel = state.historyPanel;
+    return !!(
+      root && (node === root || root.contains(node)) ||
+      panel && state.historyPortal?.dataset.historyOpen === "true" && (node === panel || panel.contains(node))
+    );
   }
 
   function installHistoryPointerTracker(root) {
-    const onPointerMove = (event) => {
-      if (isPointerInsideHistorySurface(event.clientX, event.clientY)) {
-        openSpendHistory();
-      } else if (root.dataset.historyOpen === "true") {
-        scheduleCloseSpendHistory();
-      }
+    ensureHistoryPortal(root);
+    const surfaces = [root, state.historyPanel].filter(Boolean);
+    const onPointerEnter = () => {
+      state.historyPointerInside = true;
+      openSpendHistory();
     };
-    const onPointerLeave = () => {
-      if (root.dataset.historyOpen === "true") scheduleCloseSpendHistory();
+    const onPointerLeave = (event) => {
+      if (isNodeInsideHistorySurface(event && event.relatedTarget, root)) return;
+      state.historyPointerInside = false;
+      if (root.dataset.historyOpen === "true") scheduleCloseSpendHistory(event);
     };
+    const onFocusIn = () => {
+      state.historyFocusInside = true;
+      openSpendHistory();
+    };
+    const onFocusOut = (event) => {
+      if (isNodeInsideHistorySurface(event && event.relatedTarget, root)) return;
+      state.historyFocusInside = false;
+      if (root.dataset.historyOpen === "true") scheduleCloseSpendHistory(event);
+    };
+    const resetAndClose = () => closeSpendHistory();
 
-    document.addEventListener("pointermove", onPointerMove, { passive: true });
-    document.addEventListener("pointerdown", onPointerMove, { passive: true });
-    window.addEventListener("blur", closeSpendHistory);
-    document.addEventListener("mouseleave", onPointerLeave);
+    for (const surface of surfaces) {
+      surface.addEventListener("pointerenter", onPointerEnter, { passive: true });
+      surface.addEventListener("pointerleave", onPointerLeave, { passive: true });
+      surface.addEventListener("focusin", onFocusIn);
+      surface.addEventListener("focusout", onFocusOut);
+    }
+    window.addEventListener("blur", resetAndClose);
+    document.addEventListener("mouseleave", resetAndClose);
 
     return () => {
-      document.removeEventListener("pointermove", onPointerMove);
-      document.removeEventListener("pointerdown", onPointerMove);
-      window.removeEventListener("blur", closeSpendHistory);
-      document.removeEventListener("mouseleave", onPointerLeave);
+      if (state.historyCloseTimer) {
+        window.clearTimeout(state.historyCloseTimer);
+        state.historyCloseTimer = 0;
+      }
+      state.historyPointerInside = false;
+      state.historyFocusInside = false;
+      for (const surface of surfaces) {
+        surface.removeEventListener("pointerenter", onPointerEnter);
+        surface.removeEventListener("pointerleave", onPointerLeave);
+        surface.removeEventListener("focusin", onFocusIn);
+        surface.removeEventListener("focusout", onFocusOut);
+      }
+      window.removeEventListener("blur", resetAndClose);
+      document.removeEventListener("mouseleave", resetAndClose);
+      delete root.dataset.historyHoverInstalled;
     };
   }
 
@@ -2288,7 +3066,8 @@
   function updateDockVisibility(root) {
     const contextVisible = state.contextCard && !state.contextCard.hidden;
     const providerVisible = state.providerCard && !state.providerCard.hidden;
-    if (state.inlineMountPending && (state.uiState || readUiState()).mode !== "floating") {
+    const uiMode = (state.uiState || readUiState()).mode;
+    if ((state.headerMountPending && uiMode === "header") || (state.inlineMountPending && uiMode === "inline")) {
       root.hidden = true;
       closeSpendHistory();
       return;
@@ -2308,10 +3087,13 @@
 
   function hideMeter(root, card, value, fill, title) {
     if (!card) return;
+    state.renderedContextReading = null;
+    state.renderedContextConversationId = null;
     if (card.dataset.known !== "false") card.dataset.known = "false";
     if (card.dataset.level !== "normal") card.dataset.level = "normal";
     if (card.dataset.compressionWarning !== "false") card.dataset.compressionWarning = "false";
-    if (card.title !== title) card.title = title;
+    if (card.hasAttribute("title")) card.removeAttribute("title");
+    card.dataset.hiddenReason = String(title || "");
     if (value.textContent !== "Context Left --") value.textContent = "Context Left --";
     if (fill.style.width !== "0%") fill.style.width = "0%";
     const ring = state.contextRing || card.querySelector(".ccm-ring");
@@ -2733,6 +3515,38 @@
     return null;
   }
 
+  function clearAppSignalTransactionState() {
+    state.appSignalScope = null;
+    state.appSignalScopeGeneration = 0;
+    state.appSignalScopeOwnerConversationId = null;
+    state.appSignalLastLookupAt = 0;
+    state.appSignalCachedReading = null;
+    state.appSignalCachedConversationId = null;
+    state.appSignalCachedGeneration = 0;
+    state.appSignalCachedAt = 0;
+    state.appSignalScopeRetryConversationId = null;
+    state.appSignalScopeRetryCount = 0;
+  }
+
+  function bindReadingToCurrentTransaction(reading, conversationId, ownership = "explicit") {
+    if (!reading) return null;
+    const activeConversationId = normalizeConversationId(conversationId || state.activeConversationId);
+    const readingConversationId = normalizeConversationId(reading.conversationId);
+    if (!activeConversationId) return null;
+    if (readingConversationId && !conversationIdsMatch(readingConversationId, activeConversationId)) return null;
+    reading.conversationId = activeConversationId;
+    reading.ownership = ownership;
+    reading.captureGeneration = state.conversationGeneration;
+    reading.capturedAt = Date.now();
+    return reading;
+  }
+
+  function isCurrentConversationTransaction(reading, activeConversationId = state.activeConversationId) {
+    if (!reading || !activeConversationId) return false;
+    if (!conversationIdsMatch(reading.conversationId, activeConversationId)) return false;
+    return reading.captureGeneration === state.conversationGeneration;
+  }
+
   function getObjectConversationId(value) {
     if (!value || typeof value !== "object") return null;
 
@@ -2762,14 +3576,38 @@
     const normalizedConversationId = normalizeConversationId(activeConversationId);
     if (!normalizedConversationId) return false;
 
-    if (normalizedConversationId !== state.activeConversationId) {
+    const startsNewTransaction =
+      normalizedConversationId !== state.activeConversationId || options.forceNewEpoch === true;
+    if (startsNewTransaction) {
       clearRetryUpdate();
       window.clearTimeout(state.pendingUpdate);
       state.pendingUpdateDueAt = 0;
+      state.conversationGeneration += 1;
+      state.activationEpoch += 1;
       state.activeConversationId = normalizedConversationId;
       state.cachedActiveConversationId = normalizedConversationId;
       state.activeConversationIdLookupAt = Date.now();
-      state.lastReading = state.readingsByConversationId.get(normalizedConversationId) || null;
+      state.lastReading = null;
+      state.renderedContextReading = null;
+      state.renderedContextConversationId = null;
+      state.authoritySnapshot = null;
+      state.transactionStartedAt = Date.now();
+      state.transactionReason = options.reason || (options.pendingNavigation ? "navigation" : "activation");
+      clearAppSignalTransactionState();
+      if (state.historyCloseTimer) {
+        window.clearTimeout(state.historyCloseTimer);
+        state.historyCloseTimer = 0;
+      }
+      state.historyPointerInside = false;
+      state.historyFocusInside = false;
+      if (state.root) {
+        state.root.hidden = true;
+        state.root.dataset.historyOpen = "false";
+      }
+      if (state.historyPortal) state.historyPortal.dataset.historyOpen = "false";
+      if (state.historyPanel) {
+        state.historyPanel.setAttribute("aria-hidden", "true");
+      }
       state.lastScanAt = 0;
       state.lastScannedConversationId = null;
       state.expensiveFallbackScannedAt = 0;
@@ -2798,6 +3636,38 @@
 
   function updateActiveConversationId() {
     const activeConversationId = readActiveConversationId();
+    if (!activeConversationId && Date.now() < state.navigationPendingUntil) {
+      const hadAuthoritativeConversation = !!(
+        state.activeConversationId ||
+        state.lastReading ||
+        state.renderedContextReading ||
+        state.renderedContextConversationId
+      );
+      if (hadAuthoritativeConversation) {
+        state.conversationGeneration = (Number(state.conversationGeneration) || 0) + 1;
+        state.activationEpoch = (Number(state.activationEpoch) || 0) + 1;
+        state.transactionStartedAt = Date.now();
+        state.transactionReason = "navigation-pending";
+      }
+      state.activeConversationId = null;
+      state.cachedActiveConversationId = null;
+      state.activeConversationIdLookupAt = Date.now();
+      state.lastReading = null;
+      state.renderedContextReading = null;
+      state.renderedContextConversationId = null;
+      state.authoritySnapshot = null;
+      state.appSignalScope = null;
+      state.appSignalScopeGeneration = 0;
+      state.appSignalScopeOwnerConversationId = null;
+      state.appSignalLastLookupAt = 0;
+      state.appSignalCachedReading = null;
+      state.appSignalCachedConversationId = null;
+      state.appSignalCachedGeneration = 0;
+      state.appSignalCachedAt = 0;
+      state.lastScanAt = 0;
+      state.lastScannedConversationId = null;
+      return null;
+    }
     if (activeConversationId) {
       if (
         state.activeConversationId &&
@@ -3119,7 +3989,15 @@
   }
 
   function findAppSignalScope() {
-    if (isAppSignalScope(state.appSignalScope)) return state.appSignalScope;
+    if (
+      isAppSignalScope(state.appSignalScope) &&
+      state.appSignalScopeGeneration === state.conversationGeneration
+    ) return state.appSignalScope;
+    if (state.appSignalScopeGeneration !== state.conversationGeneration) {
+      state.appSignalScope = null;
+      state.appSignalScopeGeneration = 0;
+      state.appSignalScopeOwnerConversationId = null;
+    }
 
     const now = Date.now();
     if (now - state.appSignalLastLookupAt < 2000) return null;
@@ -3129,12 +4007,14 @@
     const root = document.getElementById("root");
     const current = document.querySelector(`[aria-current="page"]`);
     const activeThread = document.querySelector(`[data-app-action-sidebar-thread-active="true"]`);
+    const currentThread = current && current.closest("[data-app-action-sidebar-thread-id]");
+    const activeThreadContainer = activeThread && activeThread.closest("[data-app-action-sidebar-thread-id]");
     const nodes = [
-      root,
-      current,
+      activeThreadContainer,
+      currentThread,
       activeThread,
-      current && current.closest("[data-app-action-sidebar-thread-id]"),
-      activeThread && activeThread.closest("[data-app-action-sidebar-thread-id]"),
+      current,
+      root,
       document.body,
       document.documentElement,
       ...(root
@@ -3155,7 +4035,18 @@
 
         const scope = findAppSignalScopeInValue(value, 18, seen);
         if (scope) {
+          const anchorConversationId = normalizeConversationId(
+            getElementConversationId(node) ||
+            getElementConversationId(node.closest && node.closest("[data-app-action-sidebar-thread-id]")),
+          );
+          if (
+            anchorConversationId &&
+            state.activeConversationId &&
+            !conversationIdsMatch(anchorConversationId, state.activeConversationId)
+          ) continue;
           state.appSignalScope = scope;
+          state.appSignalScopeGeneration = state.conversationGeneration;
+          state.appSignalScopeOwnerConversationId = anchorConversationId;
           return scope;
         }
       }
@@ -3200,27 +4091,56 @@
   function ensureAppSignalModules() {
     if (state.appSignalModules) return state.appSignalModules;
     if (state.appSignalModulesPromise) return null;
-    state.appSignalModulesRequestedAt = Date.now();
+    const now = Date.now();
+    if (state.appSignalModuleRetryAt > now) return null;
+    state.appSignalModulesRequestedAt = now;
 
     const appServerUrl = findLoadedAssetUrl(
       "app-server-manager-signals",
-      "./assets/app-server-manager-signals-7MlBpIlX.js",
+      "./assets/app-server-manager-signals-WXrD8bmC.js",
     );
     const signalUrl = findLoadedAssetUrl(
       "setting-storage",
-      "./assets/setting-storage-kJblH-wH.js",
+      "./assets/setting-storage-DBp4-kRn.js",
     );
 
-    state.appSignalModulesPromise = Promise.all([
-      import(appServerUrl),
-      import(signalUrl),
-    ])
-      .then(([appServerSignals, signalStorage]) => {
-        state.appSignalModules = { appServerSignals, signalStorage };
+    const optionalSignalStorage = import(signalUrl)
+      .then((signalStorage) => {
+        state.appSignalOptionalModuleError = null;
+        return signalStorage;
+      })
+      .catch((error) => {
+        state.appSignalOptionalModuleError = {
+          url: signalUrl,
+          message: error instanceof Error ? error.message : String(error),
+          at: Date.now(),
+        };
+        return null;
+      });
+
+    state.appSignalModulesPromise = import(appServerUrl)
+      .then((appServerSignals) => {
+        state.appSignalModules = { appServerSignals, signalStorage: null };
+        state.appSignalModuleError = null;
         scheduleUpdate();
+        state.appSignalModuleRetryAt = 0;
+
+        optionalSignalStorage.then((signalStorage) => {
+          if (!signalStorage || state.appSignalModules?.appServerSignals !== appServerSignals) return;
+          state.appSignalModules.signalStorage = signalStorage;
+          scheduleUpdate();
+        });
+
         return state.appSignalModules;
       })
-      .catch(() => {
+      .catch((error) => {
+        state.appSignalModuleError = {
+          url: appServerUrl,
+          message: error instanceof Error ? error.message : String(error),
+          at: Date.now(),
+        };
+        console.warn("[Context Meter] Failed to import required app-signal module", appServerUrl, error);
+        state.appSignalModuleRetryAt = Date.now() + APP_SIGNAL_IMPORT_RETRY_MS;
         state.appSignalModulesPromise = null;
         return null;
       });
@@ -3229,61 +4149,126 @@
   }
 
   // setting-storage 的 rt helper 会解开嵌套 signal；缺失时退回 scope.get 的两段读取。
-  function readSignalValue(scope, selector, argument) {
+  function readSignalValue(scope, selector, argument, isValidValue) {
     if (!scope || !selector) return null;
+
+    let directValue = null;
+    try {
+      directValue = scope.get(selector, argument);
+    } catch (error) {
+      state.appSignalLastReadError = {
+        stage: "direct",
+        message: error instanceof Error ? error.message : String(error),
+        at: Date.now(),
+      };
+      return null;
+    }
+
+    if (typeof isValidValue !== "function" || isValidValue(directValue)) {
+      state.appSignalLastReadError = null;
+      return directValue;
+    }
 
     const modules = state.appSignalModules;
     const readHelper = modules && modules.signalStorage && modules.signalStorage.rt;
     if (typeof readHelper === "function") {
       try {
-        return readHelper(scope, selector, argument);
-      } catch {
-        return null;
+        const helperValue = readHelper(scope, selector, argument);
+        if (isValidValue(helperValue)) {
+          state.appSignalLastReadError = null;
+          return helperValue;
+        }
+      } catch (error) {
+        state.appSignalLastReadError = {
+          stage: "optional-helper",
+          message: error instanceof Error ? error.message : String(error),
+          at: Date.now(),
+        };
       }
     }
 
-    try {
-      const nestedSignal = scope.get(selector, argument);
-      if (nestedSignal && typeof nestedSignal === "object") {
-        return scope.get(nestedSignal);
+    if (directValue && (typeof directValue === "object" || typeof directValue === "function")) {
+      try {
+        const nestedValue = scope.get(directValue);
+        if (isValidValue(nestedValue)) {
+          state.appSignalLastReadError = null;
+          return nestedValue;
+        }
+      } catch (error) {
+        state.appSignalLastReadError = {
+          stage: "legacy-nested",
+          message: error instanceof Error ? error.message : String(error),
+          at: Date.now(),
+        };
       }
-    } catch {
-      return null;
     }
 
     return null;
   }
 
-  function findTokenUsageSelector(scope, conversationId) {
-    if (!scope || !conversationId) return null;
+  function classifyAppSignalTokenUsage(value, conversationId) {
+    if (!value || typeof value !== "object") return null;
 
-    if (state.appSignalTokenUsageSelector) return state.appSignalTokenUsageSelector;
+    const ownerConversationId =
+      value.conversationId ||
+      value.localConversationId ||
+      value.threadId ||
+      value.params && (value.params.conversationId || value.params.localConversationId || value.params.threadId) ||
+      value.thread && (value.thread.conversationId || value.thread.localConversationId || value.thread.threadId) ||
+      value.conversation && (value.conversation.conversationId || value.conversation.localConversationId || value.conversation.threadId || value.conversation.id) ||
+      null;
+    if (ownerConversationId && !conversationIdsMatch(ownerConversationId, conversationId)) return null;
 
-    const now = Date.now();
-    if (now - state.appSignalTokenUsageSelectorLookupAt < APP_SIGNAL_SELECTOR_SCAN_INTERVAL_MS) {
-      return null;
+    const modelContextWindow = firstFiniteNumber(value.modelContextWindow, value.model_context_window);
+    const lastUsage = value.last || value.lastTokenUsage || value.last_token_usage;
+    const totalTokens = firstFiniteNumber(
+      lastUsage && lastUsage.totalTokens,
+      lastUsage && lastUsage.total_tokens,
+    );
+    if (modelContextWindow === 0 && totalTokens === 0) return { kind: "pending" };
+    if (!Number.isFinite(modelContextWindow) || modelContextWindow <= 0) return null;
+    if (!Number.isFinite(totalTokens) || totalTokens < 0) return null;
+
+    const reading = parseStatusContextUsageObject(value, "app-signal", ownerConversationId || conversationId);
+    if (!reading) return null;
+    reading.appSignalOwnerConversationId = ownerConversationId || null;
+    return { kind: "valid", reading };
+  }
+
+  function readAppSignalContextUsage(scope, modules, conversationId) {
+    const selectors = [];
+    const addSelector = (selector) => {
+      if (selector == null || selectors.includes(selector)) return;
+      selectors.push(selector);
+    };
+
+    // Reuse only a selector that previously returned a valid token-usage object.
+    // Otherwise inspect exports until the active conversation yields a real value.
+    addSelector(state.appSignalTokenUsageSelector);
+    for (const selector of Object.values(modules.appServerSignals)) {
+      addSelector(selector);
     }
-    state.appSignalTokenUsageSelectorLookupAt = now;
 
-    const modules = state.appSignalModules;
-    const appServerSignals = modules && modules.appServerSignals;
-    if (!appServerSignals || typeof appServerSignals !== "object") return null;
-
-    let scanned = 0;
-    for (const [exportName, selector] of Object.entries(appServerSignals)) {
-      if (!selector || (typeof selector !== "object" && typeof selector !== "function")) continue;
-      scanned += 1;
-      if (scanned > APP_SIGNAL_SELECTOR_SCAN_LIMIT) break;
-
-      const value = readSignalValue(scope, selector, conversationId);
-      if (!looksLikeStatusContextUsageObject(value)) continue;
-
+    const classifyTokenUsage = (value) => classifyAppSignalTokenUsage(value, conversationId);
+    let pendingSeen = false;
+    for (const selector of selectors) {
+      const selectorWasValidated = state.appSignalTokenUsageSelector != null && selector === state.appSignalTokenUsageSelector;
+      const tokenUsage = readSignalValue(scope, selector, conversationId, classifyTokenUsage);
+      const result = classifyTokenUsage(tokenUsage);
+      if (!result) continue;
+      if (result.kind === "pending") {
+        if (selectorWasValidated) return { kind: "pending" };
+        pendingSeen = true;
+        continue;
+      }
       state.appSignalTokenUsageSelector = selector;
-      state.appSignalTokenUsageSelectorExport = exportName;
-      return selector;
+      result.reading.ownership = "app-signal";
+      result.reading.captureGeneration = state.conversationGeneration;
+      result.reading.capturedAt = Date.now();
+      return result.reading;
     }
 
-    return null;
+    return pendingSeen ? { kind: "pending" } : null;
   }
 
   function scanAppSignalContextUsage(activeConversationId) {
@@ -3293,6 +4278,7 @@
       state.appSignalCachedReading &&
       requestedConversationId &&
       conversationIdsMatch(requestedConversationId, state.appSignalCachedConversationId) &&
+      state.appSignalCachedGeneration === state.conversationGeneration &&
       now - state.appSignalCachedAt < APP_SIGNAL_READING_CACHE_MS
     ) {
       return state.appSignalCachedReading;
@@ -3308,23 +4294,82 @@
     const scope = findAppSignalScope();
     if (!scope) return null;
 
+    const scopeValue = scope.value && typeof scope.value === "object" ? scope.value : scope;
+    const scopeOwnerConversationId = normalizeConversationId(
+      state.appSignalScopeOwnerConversationId ||
+      scopeValue.conversationId ||
+      scopeValue.localConversationId ||
+      scopeValue.threadId ||
+      scopeValue.params && (scopeValue.params.conversationId || scopeValue.params.localConversationId || scopeValue.params.threadId) ||
+      scopeValue.thread && (scopeValue.thread.conversationId || scopeValue.thread.localConversationId || scopeValue.thread.threadId) ||
+      scopeValue.conversation && (scopeValue.conversation.conversationId || scopeValue.conversation.localConversationId || scopeValue.conversation.threadId || scopeValue.conversation.id),
+    );
     const conversationId =
       normalizeConversationId(activeConversationId) ||
-      normalizeConversationId(scope.value && scope.value.conversationId);
+      scopeOwnerConversationId;
     if (!conversationId) return null;
-
-    const latestTokenUsageSelector = findTokenUsageSelector(scope, conversationId);
-    const tokenUsage = readSignalValue(scope, latestTokenUsageSelector, conversationId);
-    const reading = parseStatusContextUsageObject(tokenUsage, "app-signal", conversationId);
-    if (reading) {
-      state.appSignalCachedReading = reading;
-      state.appSignalCachedConversationId = conversationId;
-      state.appSignalCachedAt = now;
-      state.appSignalLastSuccessAt = now;
-      return reading;
+    if (scopeOwnerConversationId && !conversationIdsMatch(scopeOwnerConversationId, conversationId)) {
+      if (state.appSignalScope === scope) {
+        state.appSignalScope = null;
+        state.appSignalScopeOwnerConversationId = null;
+        state.appSignalLastLookupAt = 0;
+        state.appSignalScopeInvalidations += 1;
+      }
+      return null;
     }
 
-    return null;
+    if (!conversationIdsMatch(conversationId, state.appSignalScopeRetryConversationId)) {
+      state.appSignalScopeRetryConversationId = conversationId;
+      state.appSignalScopeRetryCount = 0;
+    }
+
+    const result = readAppSignalContextUsage(scope, modules, conversationId);
+    if (result && result.kind === "pending") {
+      if (now < state.switchRetryUntil) scheduleUpdate(SWITCH_RETRY_INTERVAL_MS);
+      return null;
+    }
+    if (!result) {
+      // React may expose an obsolete structural scope while a conversation is hydrating.
+      // Discard it and retry discovery a bounded number of times after the DOM settles.
+      if (state.appSignalScope === scope) {
+        state.appSignalScope = null;
+        state.appSignalScopeOwnerConversationId = null;
+        state.appSignalLastLookupAt = 0;
+        state.appSignalScopeInvalidations += 1;
+        if (state.appSignalScopeRetryCount < 2) {
+          state.appSignalScopeRetryCount += 1;
+          scheduleUpdate(APP_SIGNAL_IMPORT_GRACE_MS);
+        }
+      }
+      return null;
+    }
+
+    if (
+      result.captureGeneration !== state.conversationGeneration ||
+      !conversationIdsMatch(result.conversationId, conversationId)
+    ) return null;
+    const resultOwnerConversationId = normalizeConversationId(result.appSignalOwnerConversationId);
+    if (
+      resultOwnerConversationId
+        ? !conversationIdsMatch(resultOwnerConversationId, conversationId)
+        : !scopeOwnerConversationId || !conversationIdsMatch(scopeOwnerConversationId, conversationId)
+    ) {
+      if (state.appSignalScope === scope) {
+        state.appSignalScope = null;
+        state.appSignalScopeOwnerConversationId = null;
+        state.appSignalLastLookupAt = 0;
+        state.appSignalScopeInvalidations += 1;
+      }
+      return null;
+    }
+
+    state.appSignalScopeRetryCount = 0;
+    state.appSignalCachedReading = result;
+    state.appSignalCachedConversationId = conversationId;
+    state.appSignalCachedGeneration = state.conversationGeneration;
+    state.appSignalCachedAt = now;
+    state.appSignalLastSuccessAt = now;
+    return result;
   }
 
   function collectContextUsageSampleConversationIds(activeConversationId) {
@@ -3453,7 +4498,8 @@
     if (!activeConversationId) {
       const appSignalReading = scanAppSignalContextUsage(null);
       if (appSignalReading && appSignalReading.conversationId) {
-        retainConversationId(appSignalReading.conversationId);
+        activateConversationId(appSignalReading.conversationId);
+        appSignalReading.captureGeneration = state.conversationGeneration;
         state.switchRetryUntil = 0;
         clearRetryUpdate();
         return appSignalReading;
@@ -3463,10 +4509,11 @@
     }
 
     const cachedReading = state.readingsByConversationId.get(activeConversationId) || null;
-    const fallbackReading =
-      state.lastReading && state.lastReading.conversationId && conversationIdsMatch(activeConversationId, state.lastReading.conversationId)
-        ? state.lastReading
-        : cachedReading;
+    const fallbackReading = isCurrentConversationTransaction(state.lastReading, activeConversationId)
+      ? state.lastReading
+      : isCurrentConversationTransaction(cachedReading, activeConversationId)
+        ? cachedReading
+        : null;
 
     const now = Date.now();
     const activeChangedSinceScan = activeConversationId !== state.lastScannedConversationId;
@@ -3486,7 +4533,9 @@
     if (!shouldRunStatusScan) {
       if (shouldWaitForAppSignalModules(now)) {
         scheduleUpdate(APP_SIGNAL_IMPORT_GRACE_MS);
-        return state.lastReading;
+        return isCurrentConversationTransaction(state.lastReading, activeConversationId)
+          ? state.lastReading
+          : null;
       }
       return fallbackReading;
     }
@@ -3500,7 +4549,11 @@
     state.lastScannedConversationId = activeConversationId;
     state.lastScanAt = now;
 
-    const statusReactReading = scanStatusReactContextUsage(activeConversationId);
+    const statusReactReading = bindReadingToCurrentTransaction(
+      scanStatusReactContextUsage(activeConversationId),
+      activeConversationId,
+      "explicit",
+    );
     if (statusReactReading) {
       state.switchRetryUntil = 0;
       clearRetryUpdate();
@@ -3512,7 +4565,11 @@
       state.expensiveFallbackConversationId = activeConversationId;
 
       // fallback 只保留结构化对象，避免按页面文案猜测。
-      const windowReading = scanWindowForContextUsage(activeConversationId);
+      const windowReading = bindReadingToCurrentTransaction(
+        scanWindowForContextUsage(activeConversationId),
+        activeConversationId,
+        "explicit",
+      );
       if (windowReading) {
         state.switchRetryUntil = 0;
         clearRetryUpdate();
@@ -3528,7 +4585,9 @@
 
     if (shouldWaitForAppSignalModules(now)) {
       scheduleUpdate(APP_SIGNAL_IMPORT_GRACE_MS);
-      return state.lastReading;
+      return isCurrentConversationTransaction(state.lastReading, activeConversationId)
+        ? state.lastReading
+        : null;
     }
 
     if (inSwitchRetryWindow) {
@@ -3544,9 +4603,17 @@
 
   function rememberReading(reading, fallbackConversationId) {
     if (!reading) return;
+    const activeConversationId = normalizeConversationId(fallbackConversationId || state.activeConversationId);
+    if (!isCurrentConversationTransaction(reading, activeConversationId)) return;
 
-    rememberContextUsageReading(reading, fallbackConversationId);
+    rememberContextUsageReading(reading, activeConversationId);
     state.lastReading = reading;
+    state.authoritySnapshot = {
+      conversationId: activeConversationId,
+      used: reading.used,
+      limit: reading.limit,
+      generation: state.conversationGeneration,
+    };
   }
 
   function updateMeter() {
@@ -3608,7 +4675,6 @@
     const level = levelForLeftPercent(leftPercent, "context");
     const compressionWarning = shouldShowCompressionWarning(leftPercent) ? "true" : "false";
     const remainingTokens = reading.used != null && reading.limit != null ? Math.max(0, reading.limit - reading.used) : null;
-    const title = formatContextTitle(reading, reading.used, remainingTokens, leftPercent, reading.percent);
     const text = showUsedInsteadOfLeft
       ? `Context Used ${percentText}%${details}`
       : Number.isFinite(remainingTokens)
@@ -3627,7 +4693,15 @@
     if (contextCard.dataset.compressionWarning !== compressionWarning) {
       contextCard.dataset.compressionWarning = compressionWarning;
     }
-    if (contextCard.title !== title) contextCard.title = title;
+    state.renderedContextReading = {
+      ...reading,
+      conversationId: readingConversationId,
+    };
+    state.renderedContextConversationId = normalizeConversationId(
+      activeConversationId || readingConversationId || "__unknown__"
+    ) || "__unknown__";
+    clearContextNativeTitles();
+    if (contextCard.dataset.hiddenReason) delete contextCard.dataset.hiddenReason;
     if (value.textContent !== text) value.textContent = text;
     if (fill.style.width !== width) fill.style.width = width;
     const contextRing = state.contextRing;
@@ -3739,6 +4813,7 @@
     destroy() {
       window.clearInterval(state.timer);
       window.clearTimeout(state.pendingUpdate);
+      closeSpendHistory();
       window.clearTimeout(state.historyCloseTimer);
       state.pendingUpdateDueAt = 0;
       state.historyCloseTimer = 0;
@@ -3779,7 +4854,14 @@
     getState() {
       return {
         activeConversationId: state.activeConversationId,
+        conversationGeneration: state.conversationGeneration,
+        activationEpoch: state.activationEpoch,
+        transactionStartedAt: state.transactionStartedAt,
+        transactionReason: state.transactionReason,
+        authoritySnapshot: state.authoritySnapshot,
         lastReading: state.lastReading,
+        renderedContextReading: state.renderedContextReading,
+        renderedContextConversationId: state.renderedContextConversationId,
         cachedConversationIds: Array.from(state.readingsByConversationId.keys()),
         animatedConversationIds: Array.from(state.lastAnimatedUsedByConversationId.keys()),
         backgroundSampledConversationIds: state.contextUsageBackgroundSampleConversationIds.slice(),
